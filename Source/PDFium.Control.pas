@@ -416,7 +416,10 @@ begin
       begin
         Width := LPage.Width;
         Height := LPage.Height;
-        Rotation := LPage.Rotation;
+        if (LPage.Rotation < Low(TPdfPageRotation)) or (LPage.Rotation > High(TPdfPageRotation)) then
+          Rotation := prNormal
+        else
+          Rotation := LPage.Rotation;
       end;
       if LPage.Width > FWidth then
         FWidth := LPage.Width;
