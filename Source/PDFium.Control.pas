@@ -111,9 +111,9 @@ type
     function GetPageTop(const APageIndex: Integer): Integer;
     function PageToScreen(const AValue: Single): Integer; inline;
     function ZoomToScreen: Single;
-{$IFDEF ALPHASKINS}
+//{$IFDEF ALPHASKINS}
     procedure Loaded; override;
-{$ENDIF}
+//{$ENDIF}
     procedure KeyDown(var Key: Word; Shift: TShiftState); override;
     procedure MouseDown(AButton: TMouseButton; AShift: TShiftState; X, Y: Integer); override;
     procedure MouseMove(AShift: TShiftState; X, Y: Integer); override;
@@ -124,9 +124,9 @@ type
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
     function IsTextSelected: Boolean;
-{$IFDEF ALPHASKINS}
+//{$IFDEF ALPHASKINS}
     procedure AfterConstruction; override;
-{$ENDIF}
+//{$ENDIF}
     procedure ClearSelection;
     procedure CloseDocument;
     procedure CopyToClipboard;
