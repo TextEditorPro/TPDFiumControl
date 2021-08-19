@@ -8,7 +8,7 @@ uses
 {$IFDEF ALPHASKINS}, acSBUtils, sCommonData{$ENDIF};
 
 type
-  TPDFZoomMode = (smActualSize, smFitHeight, smFitWidth, smPercent);
+  TPDFZoomMode = (zmActualSize, zmFitHeight, zmFitWidth, zmPercent);
 
   TSelectionArray = TArray<TPDFRect>;
   TPDFControlRectArray = array of TRect;
@@ -80,6 +80,7 @@ type
     function SetSelStopCharIndex(const X, Y: Integer): Boolean;
     procedure AdjustPageInfo;
     procedure AdjustZoom;
+    procedure DoScroll(const AScrollBarKind: TScrollBarKind);
     procedure DoSizeChanged;
     procedure FormFieldFocus(ADocument: TPDFDocument; AValue: PWideChar; AValueLen: Integer; AFieldFocused: Boolean);
     procedure FormGetCurrentPage(ADocument: TPDFDocument; var APage: TPDFPage);
@@ -168,7 +169,7 @@ type
     property PageMargin: Integer read FPageMargin write FPageMargin default 6;
     property PopupMenu;
     property PrintJobTitle: string read FPrintJobTitle write FPrintJobTitle;
-    property ZoomMode: TPDFZoomMode read FZoomMode write SetZoomMode default smActualSize;
+    property ZoomMode: TPDFZoomMode read FZoomMode write SetZoomMode default zmActualSize;
     property ZoomPercent: Single read FZoomPercent write SetZoomPercent;
   end;
 
@@ -217,7 +218,7 @@ begin
   inherited Create(AOwner);
 
   ControlStyle := ControlStyle + [csOpaque];
-  FZoomMode := smActualSize;
+  FZoomMode := zmActualSize;
   FZoomPercent := 100;
   FPageIndex := 0;
   FPageMargin := 6;
@@ -318,6 +319,12 @@ begin
     Result := nil;
 end;
 
+procedure TPDFiumControl.DoScroll(const AScrollBarKind: TScrollBarKind);
+begin
+  if Assigned(FOnScroll) then
+    FOnScroll(Self, AScrollBarKind);
+end;
+
 function TPDFiumControl.DoMouseWheel(AShift: TShiftState; AWheelDelta: Integer; AMousePos: TPoint): Boolean;
 begin
   FChanged := True;
@@ -325,8 +332,7 @@ begin
 
   UpdatePageIndex;
 
-  if Assigned(OnScroll) then
-    OnScroll(Self, sbVertical);
+  DoScroll(sbVertical);
 
   Result := True;
 end;
@@ -337,8 +343,9 @@ begin
 
   inherited;
 
-  if Assigned(OnScroll) then
-    OnScroll(Self, sbHorizontal);
+  DoScroll(sbHorizontal);
+
+  Invalidate;
 end;
 
 procedure TPDFiumControl.UpdatePageIndex;
@@ -367,8 +374,9 @@ begin
 
   UpdatePageIndex;
 
-  if Assigned(OnScroll) then
-    OnScroll(Self, sbVertical);
+  DoScroll(sbVertical);
+
+  Invalidate;
 end;
 
 procedure TPDFiumControl.LoadFromFile(const AFilename: string);
@@ -483,7 +491,7 @@ end;
 
 procedure TPDFiumControl.Zoom(const APercent: Single);
 begin
-  FZoomMode := smPercent;
+  FZoomMode := zmPercent;
   SetZoomPercent(APercent);
 end;
 
@@ -504,13 +512,13 @@ end;
 procedure TPDFiumControl.AdjustZoom;
 begin
   case FZoomMode of
-    smPercent:
+    zmPercent:
       Exit;
-    smActualSize:
+    zmActualSize:
       SetZoomPercent(100);
-    smFitHeight:
+    zmFitHeight:
       SetZoomPercent(PageHeightZoomPercent);
-    smFitWidth:
+    zmFitWidth:
       SetZoomPercent(PageWidthZoomPercent);
   end;
 end;
@@ -966,17 +974,17 @@ end;
 function TPDFiumControl.PageHeightZoomPercent: Single;
 var
   LScale: Single;
-  LScale1, LScale2: Single;
+  LZoom1, LZoom2: Single;
 begin
   if FPageIndex < 0 then
     Exit(100);
 
   LScale := 72 / Screen.PixelsPerInch;
-  LScale1 := (ClientWidth - 2 * FPageMargin) * LScale / FPageInfo[FPageIndex].Width;
-  LScale2 := (ClientHeight - 2 * FPageMargin) * LScale / FPageInfo[FPageIndex].Height;
-  if LScale1 > LScale2 then
-    LScale1 := LScale2;
-  Result := 100 * LScale1;
+  LZoom1 := (ClientWidth - 2 * FPageMargin) * LScale / FPageInfo[FPageIndex].Width;
+  LZoom2 := (ClientHeight - 2 * FPageMargin) * LScale / FPageInfo[FPageIndex].Height;
+  if LZoom1 > LZoom2 then
+    LZoom1 := LZoom2;
+  Result := 100 * LZoom1;
 end;
 
 function TPDFiumControl.PageWidthZoomPercent: Single;
@@ -1283,13 +1291,13 @@ end;
 
 procedure TPDFiumControl.ZoomToHeight;
 begin
-  ZoomMode := smFitHeight;
+  ZoomMode := zmFitHeight;
   DoSizeChanged;
 end;
 
 procedure TPDFiumControl.ZoomToWidth;
 begin
-  ZoomMode := smFitWidth;
+  ZoomMode := zmFitWidth;
   DoSizeChanged;
 end;
 
