@@ -15,6 +15,7 @@ type
   TPDFControlPDFRectArray = array of TPDFRect;
 
   TPDFControlScrollEvent = procedure(const ASender: TObject; const AScrollBar: TScrollBarKind) of object;
+  TPDFLoadProtectedEvent = procedure(const ASender: TObject; var APassword: AnsiString) of object;
 
   TPageInfo = record
     Height: Single;
@@ -40,6 +41,7 @@ type
     FHeight: Single;
     FMouseDownPoint: TPoint;
     FMousePressed: Boolean;
+    FOnLoadProtected: TPDFLoadProtectedEvent;
     FOnPaint: TNotifyEvent;
     FOnScroll: TPDFControlScrollEvent;
     FPageBorderColor: TColor;
@@ -80,6 +82,7 @@ type
     function SetSelStopCharIndex(const X, Y: Integer): Boolean;
     procedure AdjustPageInfo;
     procedure AdjustZoom;
+    procedure AfterLoad;
     procedure DoScroll(const AScrollBarKind: TScrollBarKind);
     procedure DoSizeChanged;
     procedure FormFieldFocus(ADocument: TPDFDocument; AValue: PWideChar; AValueLen: Integer; AFieldFocused: Boolean);
@@ -87,7 +90,6 @@ type
     procedure FormOutputSelectedRect(ADocument: TPDFDocument; APage: TPDFPage; const APageRect: TPDFRect);
     procedure GetPageWebLinks;
     procedure InvalidateRectDiffs(const AOldRects, ANewRects: TPDFControlRectArray);
-    procedure OnLoad;
     procedure PageChanged;
     procedure PaintAlphaSelection(ADC: HDC; const APage: TPDFPage; const ARects: TPDFRectArray; const AIndex: Integer);
     procedure PaintPage(ADC: HDC; const APage: TPDFPage; const AIndex: Integer);
@@ -99,6 +101,7 @@ type
     procedure SetSelection(const AActive: Boolean; const AStartIndex, AStopIndex: Integer);
     procedure SetZoomMode(const AValue: TPDFZoomMode);
     procedure SetZoomPercent(const AValue: Single);
+    procedure ShowError(const AMessage: string);
     procedure UpdatePageIndex;
     procedure WebLinkClick(const AURL: string);
     procedure WMEraseBkGnd(var AMessage: TWMEraseBkgnd); message WM_ERASEBKGND;
@@ -152,6 +155,7 @@ type
     property CurrentPage: TPDFPage read GetCurrentPage;
     property Filename: string read FFilename write FFilename;
     property OnPaint: TNotifyEvent read FOnPaint write FOnPaint;
+    property OnLoadProtected: TPDFLoadProtectedEvent read FOnLoadProtected write FOnLoadProtected;
     property OnScroll: TPDFControlScrollEvent read FOnScroll write FOnScroll;
     property PageCount: Integer read FPageCount;
     property PageIndex: Integer read FPageIndex;
@@ -380,19 +384,59 @@ begin
 end;
 
 procedure TPDFiumControl.LoadFromFile(const AFilename: string);
+var
+  LPassword: AnsiString;
 begin
   FFilename := AFilename;
-  FPDFDocument.LoadFromFile(AFilename);
-  OnLoad;
+  try
+    FPDFDocument.LoadFromFile(AFilename);
+  except
+    on E: Exception do
+    if FPDF_GetLastError = FPDF_ERR_PASSWORD then
+    begin
+      LPassword := '';
+      if Assigned(FOnLoadProtected) then
+        FOnLoadProtected(Self, LPassword);
+      try
+        FPDFDocument.LoadFromFile(AFilename, LPassword);
+      except
+        on E: Exception do
+          ShowError(E.Message);
+      end;
+    end
+    else
+      ShowError(E.Message);
+  end;
+  AfterLoad;
 end;
 
 procedure TPDFiumControl.LoadFromStream(const AStream: TStream);
+var
+  LPassword: AnsiString;
 begin
-  FPDFDocument.LoadFromStream(AStream);
-  OnLoad;
+  try
+    FPDFDocument.LoadFromStream(AStream);
+  except
+    on E: Exception do
+    if FPDF_GetLastError = FPDF_ERR_PASSWORD then
+    begin
+      LPassword := '';
+      if Assigned(FOnLoadProtected) then
+        FOnLoadProtected(Self, LPassword);
+      try
+        FPDFDocument.LoadFromStream(AStream, LPassword);
+      except
+        on E: Exception do
+          ShowError(E.Message);
+      end;
+    end
+    else
+      ShowError(E.Message);
+  end;
+  AfterLoad;
 end;
 
-procedure TPDFiumControl.OnLoad;
+procedure TPDFiumControl.AfterLoad;
 begin
   SetPageCount(FPDFDocument.PageCount);
   FChanged := True;
@@ -1321,13 +1365,18 @@ begin
   FFormFieldFocused := AFieldFocused;
 end;
 
+procedure TPDFiumControl.ShowError(const AMessage: string);
+begin
+  MessageDlg(AMessage, mtError, [mbOK], 0);
+end;
+
 procedure TPDFiumControl.WebLinkClick(const AURL: string);
 var
   LResult: Boolean;
 begin
   LResult := ShellExecute(0, 'open', PChar(AURL), nil, nil, SW_NORMAL) > 32;
   if not LResult then
-    MessageDlg(SysErrorMessage(GetLastError), mtError, [mbOK], 0);
+    ShowError(SysErrorMessage(GetLastError));
 end;
 
 procedure TPDFiumControl.KeyDown(var Key: Word; Shift: TShiftState);
