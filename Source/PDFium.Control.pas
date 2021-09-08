@@ -64,6 +64,7 @@ type
     FWidth: Single;
     FZoomMode: TPDFZoomMode;
     FZoomPercent: Single;
+    function CreatePDFDocument: TPDFDocument;
     function DeviceToPage(const X, Y: Integer): TPDFPoint;
     function GetCurrentPage: TPDFPage;
     function GetPageIndexAt(const APoint: TPoint): Integer;
@@ -115,10 +116,10 @@ type
     function GetPageTop(const APageIndex: Integer): Integer;
     function PageToScreen(const AValue: Single): Integer; inline;
     function ZoomToScreen: Single;
+    procedure KeyDown(var Key: Word; Shift: TShiftState); override;
 {$IFDEF ALPHASKINS}
     procedure Loaded; override;
 {$ENDIF}
-    procedure KeyDown(var Key: Word; Shift: TShiftState); override;
     procedure MouseDown(AButton: TMouseButton; AShift: TShiftState; X, Y: Integer); override;
     procedure MouseMove(AShift: TShiftState; X, Y: Integer); override;
     procedure MouseUp(AButton: TMouseButton; AShift: TShiftState; X, Y: Integer); override;
@@ -146,12 +147,12 @@ type
     procedure SelectAll;
     procedure SelectText(const ACharIndex: Integer; const ACount: Integer);
     procedure SetFocus; override;
-    procedure ZoomToHeight;
-    procedure ZoomToWidth;
-    procedure Zoom(const APercent: Single);
 {$IFDEF ALPHASKINS}
     procedure WndProc(var AMessage: TMessage); override;
 {$ENDIF}
+    procedure ZoomToHeight;
+    procedure ZoomToWidth;
+    procedure Zoom(const APercent: Single);
     property CurrentPage: TPDFPage read GetCurrentPage;
     property Filename: string read FFilename write FFilename;
     property OnPaint: TNotifyEvent read FOnPaint write FOnPaint;
@@ -229,10 +230,7 @@ begin
   FPrintJobTitle := 'Print PDF';
   FAllowTextSelection := True;
 
-  FPDFDocument := TPDFDocument.Create;
-  FPDFDocument.OnFormFieldFocus := FormFieldFocus;
-  FPDFDocument.OnFormGetCurrentPage := FormGetCurrentPage;
-  FPDFDocument.OnFormOutputSelectedRect := FormOutputSelectedRect;
+  FPDFDocument := CreatePDFDocument;
 
   DoubleBuffered := True;
   ParentBackground := False;
@@ -246,6 +244,14 @@ begin
   VertScrollBar.Tracking := True;
   HorzScrollBar.Smooth := True;
   HorzScrollBar.Tracking := True;
+end;
+
+function TPDFiumControl.CreatePDFDocument: TPDFDocument;
+begin
+  Result := TPDFDocument.Create;
+  Result.OnFormFieldFocus := FormFieldFocus;
+  Result.OnFormGetCurrentPage := FormGetCurrentPage;
+  Result.OnFormOutputSelectedRect := FormOutputSelectedRect;
 end;
 
 procedure TPDFiumControl.CreateParams(var AParams: TCreateParams);
@@ -377,7 +383,6 @@ begin
   inherited;
 
   UpdatePageIndex;
-
   DoScroll(sbVertical);
 
   Invalidate;
@@ -468,13 +473,12 @@ begin
       begin
         Width := LPage.Width;
         Height := LPage.Height;
-        if (LPage.Rotation < Low(TPdfPageRotation)) or (LPage.Rotation > High(TPdfPageRotation)) then
-          Rotation := prNormal
-        else
-          Rotation := LPage.Rotation;
+        Rotation := prNormal;
       end;
+
       if LPage.Width > FWidth then
         FWidth := LPage.Width;
+
       FHeight := FHeight + LPage.Height;
     end;
   end;
@@ -976,11 +980,13 @@ var
 begin
   LPoint := Point(X, Y);
   LPage := CurrentPage;
+
   if Assigned(LPage) then
   for Result := 0 to Length(FWebLinksRects) - 1 do
     for LRectIndex := 0 to Length(FWebLinksRects[Result]) - 1 do
     if PtInRect(InternPageToDevice(LPage, FWebLinksRects[Result][LRectIndex], FPageInfo[FPageIndex].Rect), LPoint) then
       Exit;
+
   Result := -1;
 end;
 
@@ -1076,6 +1082,7 @@ begin
   if CanFocus then
   begin
     Winapi.Windows.SetFocus(Handle);
+
     inherited;
   end;
 end;
@@ -1142,7 +1149,7 @@ begin
     SetViewportOrgEx(ADC, LPoint.X, LPoint.Y, nil);
   end
   else
-    FPDF_RenderPage(ADC, APage.Handle, LRect.Left, LRect.Top, LRect.Width, LRect.Height, Ord(Rotation), 0);
+    FPDF_RenderPage(ADC, APage.Handle, Rect.Left, Rect.Top, Rect.Width, Rect.Height, Ord(Rotation), 0);
 end;
 
 procedure TPDFiumControl.PaintPageSelection(ADC: HDC; const APage: TPDFPage; const AIndex: Integer);
@@ -1229,10 +1236,7 @@ var
   LStream: TMemoryStream;
   LPDFDocument: TPDFDocument;
 begin
-  LPDFDocument := TPDFDocument.Create;
-  LPDFDocument.OnFormFieldFocus := FormFieldFocus;
-  LPDFDocument.OnFormGetCurrentPage := FormGetCurrentPage;
-  LPDFDocument.OnFormOutputSelectedRect := FormOutputSelectedRect;
+  LPDFDocument := CreatePDFDocument;
   try
     { Flatten pages. Needed for form field values. }
     Screen.Cursor := crHourGlass;
@@ -1287,8 +1291,10 @@ begin
   with FPageInfo[FPageIndex] do
   begin
     Inc(Rotation);
+
     if Ord(Rotation) > Ord(pr90CounterClockwide) then
       Rotation := prNormal;
+
     if Rotation in [prNormal, pr180] then
     begin
       Height := LPage.Height;
@@ -1316,8 +1322,10 @@ begin
   with FPageInfo[FPageIndex] do
   begin
     Dec(Rotation);
+
     if Ord(Rotation) < Ord(prNormal) then
       Rotation := pr90CounterClockwide;
+
     if Rotation in [prNormal, pr180] then
     begin
       Height := LPage.Height;
@@ -1635,6 +1643,15 @@ begin
       LPrintDialog.Free;
     end;
   end;
+
+  { Note! If the document has pages in portrait and landscape orientation, this will not work properly. The problem is
+    that the orientation of the printer can be changed only when outside BeginDoc and EndDoc. If there is a need for
+    that, then Andy's core class needs to be fixed. }
+  if ADocument.PageCount > 0 then
+    if ADocument.Pages[0].Height > ADocument.Pages[0].Width then
+      Printer.Orientation := poPortrait
+    else
+      Printer.Orientation := poLandscape;
 
   LPDFDocumentVclPrinter := TPDFDocumentVclPrinter.Create;
   try
