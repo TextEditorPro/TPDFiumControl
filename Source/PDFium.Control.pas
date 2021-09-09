@@ -97,6 +97,7 @@ type
     procedure PaintPageBorder(ADC: HDC; const ARect: TRect);
     procedure PaintPageSelection(ADC: HDC; const APage: TPDFPage; const AIndex: Integer);
     procedure SetPageCount(const AValue: Integer);
+    procedure SetPageIndex(const AValue: Integer);
     procedure SetPageNumber(const AValue: Integer);
     procedure SetScrollSize;
     procedure SetSelection(const AActive: Boolean; const AStartIndex, AStopIndex: Integer);
@@ -159,7 +160,7 @@ type
     property OnLoadProtected: TPDFLoadProtectedEvent read FOnLoadProtected write FOnLoadProtected;
     property OnScroll: TPDFControlScrollEvent read FOnScroll write FOnScroll;
     property PageCount: Integer read FPageCount;
-    property PageIndex: Integer read FPageIndex;
+    property PageIndex: Integer read FPageIndex write SetPageIndex;
     property PageNumber: Integer read GetPageNumber write SetPageNumber;
     property SelectionLength: Integer read GetSelectionLength;
     property SelectionStart: Integer read GetSelectionStart;
@@ -373,7 +374,7 @@ begin
     LPageIndex := LIndex - 1;
     Break;
   end;
-  FPageIndex := Max(LPageIndex, 0);
+  PageIndex := Max(LPageIndex, 0);
 end;
 
 procedure TPDFiumControl.WMVScroll(var AMessage: TWMVScroll);
@@ -499,6 +500,15 @@ begin
     FPageIndex := LValue;
     FChanged := True;
     VertScrollBar.Position := GetPageTop(FPageIndex);
+    PageChanged;
+  end;
+end;
+
+procedure TPDFiumControl.SetPageIndex(const AValue: Integer);
+begin
+  if FPageIndex <> AValue then
+  begin
+    FPageIndex := AValue;
     PageChanged;
   end;
 end;
@@ -635,7 +645,7 @@ begin
 
   if (AIndex >= 0) and (AIndex < FPageCount) then
   begin
-    FPageIndex := AIndex;
+    PageIndex := AIndex;
     FChanged := True;
     VertScrollBar.Position := GetPageTop(AIndex);
   end;
@@ -880,10 +890,7 @@ begin
   LPageIndex := GetPageIndexAt(Point(X, Y));
 
   if LPageIndex <> FPageIndex then
-  begin
-    FPageIndex := LPageIndex;
-    GetPageWebLinks;
-  end;
+    PageIndex := LPageIndex;
 
   LCursor := Cursor;
   try
