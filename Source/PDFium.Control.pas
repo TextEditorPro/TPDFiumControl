@@ -445,6 +445,7 @@ end;
 procedure TPDFiumControl.AfterLoad;
 begin
   SetPageCount(FPDFDocument.PageCount);
+  GetPageWebLinks;
   FChanged := True;
   Invalidate;
 end;
