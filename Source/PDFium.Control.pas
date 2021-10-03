@@ -199,7 +199,7 @@ implementation
 
 uses
   Winapi.ShellAPI, System.Character, System.Types, System.UITypes, Vcl.Clipbrd, Vcl.Printers
-{$IFDEF ALPHASKINS}, sConst, sMessages, sStyleSimply, sVCLUtils{$ENDIF};
+{$IFDEF ALPHASKINS}, sConst, sDialogs, sMessages, sStyleSimply, sVCLUtils{$ENDIF};
 
 const
   cDefaultScrollOffset = 50;
@@ -1383,7 +1383,11 @@ end;
 
 procedure TPDFiumControl.ShowError(const AMessage: string);
 begin
+{$IFDEF ALPHASKINS}
+  sMessageDlg(AMessage, mtError, [mbOK], 0);
+{$ELSE}
   MessageDlg(AMessage, mtError, [mbOK], 0);
+{$ENDIF}
 end;
 
 procedure TPDFiumControl.WebLinkClick(const AURL: string);
