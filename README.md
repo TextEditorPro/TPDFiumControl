@@ -6,9 +6,6 @@ Page scrolling PDF control for Delphi.
 
 Andy's [PdfiumLib](https://github.com/ahausladen/PdfiumLib) core classes - PdfiumCore.pas and PdfiumLib.pas.
 
-Note! Andy's code works also with the latest [pdfium-binaries](https://github.com/bblanchon/pdfium-binaries). 
-Just comment out all experimental API defines to GetMatrix and SetMatrix in PdfiumLib.pas.
-
 ## Supports
 
 - AlphaSkins (native) - https://www.alphaskins.com/
