@@ -20,7 +20,7 @@ ALPHASKINS | Native AlphaSkins support
 
 [MIT](https://github.com/TextEditorPro/TTextEditor/blob/main/LICENSE)
 
-## Connect
+## Connect 
 
 https://www.linkedin.com/in/lassemarkusrautiainen/
 
