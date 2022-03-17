@@ -4,7 +4,7 @@ interface
 
 uses
   Winapi.Messages, Winapi.Windows, System.Classes, System.Math, System.SysUtils, System.Variants, Vcl.Controls,
-  Vcl.Dialogs, Vcl.ExtCtrls, Vcl.Forms, Vcl.Graphics, Vcl.StdCtrls, PDFiumCore, PDFiumLib
+  Vcl.Dialogs, Vcl.ExtCtrls, Vcl.Forms, Vcl.Graphics, PDFiumCore, PDFiumLib
 {$IFDEF ALPHASKINS}, acSBUtils, sCommonData{$ENDIF};
 
 type
@@ -15,7 +15,7 @@ type
   TPDFControlPDFRectArray = array of TPDFRect;
 
   TPDFControlScrollEvent = procedure(const ASender: TObject; const AScrollBar: TScrollBarKind) of object;
-  TPDFLoadProtectedEvent = procedure(const ASender: TObject; var APassword: AnsiString) of object;
+  TPDFLoadProtectedEvent = procedure(const ASender: TObject; var APassword: UTF8String) of object;
 
   TPageInfo = record
     Height: Single;
@@ -391,7 +391,7 @@ end;
 
 procedure TPDFiumControl.LoadFromFile(const AFilename: string);
 var
-  LPassword: AnsiString;
+  LPassword: UTF8String;
 begin
   FFilename := AFilename;
   try
@@ -418,7 +418,7 @@ end;
 
 procedure TPDFiumControl.LoadFromStream(const AStream: TStream);
 var
-  LPassword: AnsiString;
+  LPassword: UTF8String;
 begin
   try
     FPDFDocument.LoadFromStream(AStream);
