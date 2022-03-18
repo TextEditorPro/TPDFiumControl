@@ -141,8 +141,9 @@ type
     function FindNext: Integer;
     function FindPrevious: Integer;
     function IsTextSelected: Boolean;
+    function SearchAll(const ASearchText: string): Integer; overload;
     function SearchAll(const ASearchText: string; const AHighlightAll: Boolean; const AMatchCase: Boolean;
-      const AWholeWords: Boolean): Integer;
+      const AWholeWords: Boolean): Integer; overload;
 {$IFDEF ALPHASKINS}
     procedure AfterConstruction; override;
 {$ENDIF}
@@ -191,6 +192,9 @@ type
     property PageMargin: Integer read FPageMargin write FPageMargin default 6;
     property PopupMenu;
     property PrintJobTitle: string read FPrintJobTitle write FPrintJobTitle;
+    property SearchHighlightAll: Boolean read FSearchHighlightAll write FSearchHighlightAll;
+    property SearchMatchCase: Boolean read FSearchMatchCase write FSearchMatchCase;
+    property SearchWholeWords: Boolean read FSearchWholeWords write FSearchWholeWords;
     property ZoomMode: TPDFZoomMode read FZoomMode write SetZoomMode default zmActualSize;
     property ZoomPercent: Single read FZoomPercent write SetZoomPercent;
   end;
@@ -602,6 +606,11 @@ end;
 procedure TPDFiumControl.ClearSelection;
 begin
   SetSelection(False, 0, 0);
+end;
+
+function TPDFiumControl.SearchAll(const ASearchText: string): Integer;
+begin
+  Result := SearchAll(ASearchText, FSearchHighlightAll, FSearchMatchCase, FSearchWholeWords);
 end;
 
 function TPDFiumControl.SearchAll(const ASearchText: string; const AHighlightAll: Boolean; const AMatchCase: Boolean;
