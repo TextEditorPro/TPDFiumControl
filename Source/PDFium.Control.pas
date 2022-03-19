@@ -141,6 +141,7 @@ type
     function FindNext: Integer;
     function FindPrevious: Integer;
     function IsTextSelected: Boolean;
+    function SearchAll: Integer; overload;
     function SearchAll(const ASearchText: string): Integer; overload;
     function SearchAll(const ASearchText: string; const AHighlightAll: Boolean; const AMatchCase: Boolean;
       const AWholeWords: Boolean): Integer; overload;
@@ -179,6 +180,7 @@ type
     property PageNumber: Integer read GetPageNumber write SetPageNumber;
     property SearchCount: Integer read FSearchCount write FSearchCount;
     property SearchIndex: Integer read FSearchIndex write FSearchIndex;
+    property SearchText: string read FSearchText write FSearchText;
     property SelectionLength: Integer read GetSelectionLength;
     property SelectionStart: Integer read GetSelectionStart;
     property SelectionText: string read GetSelectionText;
@@ -606,6 +608,11 @@ end;
 procedure TPDFiumControl.ClearSelection;
 begin
   SetSelection(False, 0, 0);
+end;
+
+function TPDFiumControl.SearchAll: Integer;
+begin
+  Result := SearchAll(FSearchText, FSearchHighlightAll, FSearchMatchCase, FSearchWholeWords);
 end;
 
 function TPDFiumControl.SearchAll(const ASearchText: string): Integer;
