@@ -89,6 +89,7 @@ type
     function SelectWord(const ACharIndex: Integer): Boolean;
     function SetSelStopCharIndex(const X, Y: Integer): Boolean;
     procedure AdjustPageInfo;
+    procedure AdjustScrollBar(const APageIndex: Integer);
     procedure AdjustZoom;
     procedure AfterLoad;
     procedure DoScroll(const AScrollBarKind: TScrollBarKind);
@@ -154,7 +155,7 @@ type
     procedure CopyToClipboard;
     procedure CreateParams(var AParams: TCreateParams); override;
     procedure GotoNextPage;
-    procedure GotoPage(const AIndex: Integer);
+    procedure GotoPage(const AIndex: Integer; const ASetScrollBar: Boolean = True);
     procedure GotoPreviousPage;
     procedure LoadFromFile(const AFilename: string);
     procedure LoadFromStream(const AStream: TStream);
@@ -241,6 +242,8 @@ begin
 {$IFDEF ALPHASKINS}
   FSkinData := TsScrollWndData.Create(Self, True);
   FSkinData.COC := COC_TsMemo;
+  FSkinData.CustomFont := True;
+  StyleElements := [seBorder];
 {$ENDIF}
 
   inherited Create(AOwner);
@@ -620,6 +623,22 @@ begin
   Result := SearchAll(ASearchText, FSearchHighlightAll, FSearchMatchCase, FSearchWholeWords);
 end;
 
+procedure TPDFiumControl.AdjustScrollBar(const APageIndex: Integer);
+var
+  LRect: TRect;
+  LPageRect: TRect;
+begin
+  with FPageInfo[APageIndex] do
+  begin
+    LPageRect := System.Types.Rect(0, 0, Round(Width), Round(Height));
+    LRect := InternPageToDevice(FPDFDocument.Pages[APageIndex], SearchRects[SearchCurrentIndex], LPageRect);
+    VertScrollBar.Position := GetPageTop(APageIndex) + Round( (VertScrollBar.Range / PageCount) *
+      LRect.Top / LPageRect.Height ) - LRect.Height;
+  end;
+
+  FChanged := True;
+end;
+
 function TPDFiumControl.SearchAll(const ASearchText: string; const AHighlightAll: Boolean; const AMatchCase: Boolean;
   const AWholeWords: Boolean): Integer;
 var
@@ -675,8 +694,16 @@ begin
       end;
     end;
 
-    if (Result > 0) and (FPageCount > 0) then
-      FPageInfo[0].SearchCurrentIndex := 0;
+    for LPageIndex := 0 to FPageCount - 1 do
+    with FPageInfo[LPageIndex] do
+    if Length(SearchRects) > 0 then
+    begin
+      SearchCurrentIndex := 0;
+      GotoPage(LPageIndex, False);
+      AdjustScrollBar(LPageIndex);
+
+      Break;
+    end;
   end;
 
   FSearchCount := Result;
@@ -722,7 +749,9 @@ begin
     end;
   end;
 
-  GotoPage(LPageIndex);
+  GotoPage(LPageIndex, False);
+  AdjustScrollBar(LPageIndex);
+
   Result := FSearchIndex;
 
   Invalidate;
@@ -766,7 +795,9 @@ begin
     end;
   end;
 
-  GotoPage(LPageIndex);
+  GotoPage(LPageIndex, False);
+  AdjustScrollBar(LPageIndex);
+
   Result := FSearchIndex;
 
   Invalidate;
@@ -833,10 +864,11 @@ begin
     Dec(LPageIndex);
     LY := LY + FPageInfo[LPageIndex].Height;
   end;
+
   Inc(Result, PageToScreen(LY));
 end;
 
-procedure TPDFiumControl.GotoPage(const AIndex: Integer);
+procedure TPDFiumControl.GotoPage(const AIndex: Integer; const ASetScrollBar: Boolean = True);
 begin
   if FPageIndex = AIndex then
     Exit;
@@ -845,7 +877,8 @@ begin
   begin
     PageIndex := AIndex;
     FChanged := True;
-    VertScrollBar.Position := GetPageTop(AIndex);
+    if ASetScrollBar then
+      VertScrollBar.Position := GetPageTop(AIndex);
   end;
 end;
 
