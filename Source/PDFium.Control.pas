@@ -1380,7 +1380,7 @@ end;
 procedure TPDFiumControl.PaintPageSearchResults(ADC: HDC; const APage: TPDFPage; const AIndex: Integer);
 begin
   if Length(FPageInfo[AIndex].SearchRects) > 0 then
-    PaintAlphaSelection(ADC, APage, FPageInfo[AIndex].SearchRects, AIndex, RGB(240, 204, 238));
+    PaintAlphaSelection(ADC, APage, FPageInfo[AIndex].SearchRects, AIndex, RGB(204, 224, 204));
 end;
 
 function TPDFiumControl.InternPageToDevice(const APage: TPDFPage; const APageRect: TPDFRect; const ARect: TRect): TRect;
@@ -1411,7 +1411,7 @@ var
       LColor := RGB(204, 204, 255)
     else
     if FPageInfo[AIndex].SearchCurrentIndex = LIndex then
-      LColor := RGB(204, 224, 204)
+      LColor := RGB(240, 204, 238)
     else
     if not FSearchHighlightAll then
       Result := False;
