@@ -11,7 +11,7 @@ type
   TPDFZoomMode = (zmActualSize, zmFitHeight, zmFitWidth, zmPercent);
 
   TPDFControlRectArray = array of TRect;
-  TPDFControlPDFRectArray = array of TPDFRect;
+  TPDFControlPDFRectArray = TArray<TPDFRect>;
 
   TPDFControlScrollEvent = procedure(const ASender: TObject; const AScrollBar: TScrollBarKind) of object;
   TPDFLoadProtectedEvent = procedure(const ASender: TObject; var APassword: UTF8String) of object;
@@ -22,7 +22,7 @@ type
     Rect: TRect;
     Rotation: TPDFPageRotation;
     SearchCurrentIndex: Integer;
-    SearchRects: TPDFRectArray;
+    SearchRects: TPDFControlPDFRectArray;
     Visible: Integer;
     Width: Single;
   end;
@@ -38,7 +38,7 @@ type
     FChanged: Boolean;
     FFilename: string;
     FFormFieldFocused: Boolean;
-    FFormOutputSelectedRects: TPDFRectArray;
+    FFormOutputSelectedRects: TPDFControlPDFRectArray;
     FHeight: Single;
     FMouseDownPoint: TPoint;
     FMousePressed: Boolean;
@@ -100,7 +100,7 @@ type
     procedure GetPageWebLinks;
     procedure InvalidateRectDiffs(const AOldRects, ANewRects: TPDFControlRectArray);
     procedure PageChanged;
-    procedure PaintAlphaSelection(ADC: HDC; const APage: TPDFPage; const ARects: TPDFRectArray; const AIndex: Integer;
+    procedure PaintAlphaSelection(ADC: HDC; const APage: TPDFPage; const ARects: TPDFControlPDFRectArray; const AIndex: Integer;
       const AColor: TColor = TColors.SysNone);
     procedure PaintPage(ADC: HDC; const APage: TPDFPage; const AIndex: Integer);
     procedure PaintPageBorder(ADC: HDC; const ARect: TRect);
@@ -221,7 +221,8 @@ type
 implementation
 
 uses
-  Winapi.ShellAPI, System.Character, System.Types, Vcl.Clipbrd, Vcl.Printers
+  Winapi.ShellAPI, System.Character, System.Generics.Collections, System.Generics.Defaults, System.Types, Vcl.Clipbrd,
+  Vcl.Printers
 {$IFDEF ALPHASKINS}, sConst, sDialogs, sMessages, sStyleSimply, sVCLUtils{$ENDIF};
 
 const
@@ -633,7 +634,7 @@ begin
     LPageRect := System.Types.Rect(0, 0, Round(Width), Round(Height));
     LRect := InternPageToDevice(FPDFDocument.Pages[APageIndex], SearchRects[SearchCurrentIndex], LPageRect);
     VertScrollBar.Position := GetPageTop(APageIndex) + Round( (VertScrollBar.Range / PageCount) *
-      LRect.Top / LPageRect.Height ) - LRect.Height;
+      LRect.Top / LPageRect.Height ) - 2 * LRect.Height;
   end;
 
   FChanged := True;
@@ -689,6 +690,16 @@ begin
 
         if LCount <> Length(SearchRects) then
           SetLength(SearchRects, LCount);
+
+        if Length(SearchRects) > 0 then
+          TArray.Sort<TPDFRect>(SearchRects, TComparer<TPDFRect>.Construct(
+            function (const ALeft, ARight: TPDFRect): Integer
+            begin
+              Result := Trunc(ARight.Top) - Trunc(ALeft.Top);
+              if Result = 0 then
+                Result := Trunc(ALeft.Left) - Trunc(ARight.Left);
+            end)
+          );
 
         Inc(Result, LCount);
       end;
@@ -1397,7 +1408,7 @@ procedure TPDFiumControl.PaintPageSelection(ADC: HDC; const APage: TPDFPage; con
 var
   LCount: Integer;
   LIndex: Integer;
-  LRects: TPDFRectArray;
+  LRects: TPDFControlPDFRectArray;
 begin
   LCount := APage.GetTextRectCount(SelectionStart, SelectionLength);
   if LCount > 0 then
@@ -1421,7 +1432,7 @@ begin
   Result := APage.PageToDevice(ARect.Left, ARect.Top, ARect.Width, ARect.Height, APageRect, APage.Rotation);
 end;
 
-procedure TPDFiumControl.PaintAlphaSelection(ADC: HDC; const APage: TPDFPage; const ARects: TPDFRectArray;
+procedure TPDFiumControl.PaintAlphaSelection(ADC: HDC; const APage: TPDFPage; const ARects: TPDFControlPDFRectArray;
   const AIndex: Integer; const AColor: TColor = TColors.SysNone);
 var
   LCount: Integer;
