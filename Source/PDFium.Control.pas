@@ -112,6 +112,7 @@ type
     procedure SetPageIndex(const AValue: Integer);
     procedure SetPageNumber(const AValue: Integer);
     procedure SetScrollSize;
+    procedure SetSearchHighlightAll(const AValue: Boolean);
     procedure SetSelection(const AActive: Boolean; const AStartIndex, AStopIndex: Integer);
     procedure SetZoomMode(const AValue: TPDFZoomMode);
     procedure SetZoomPercent(const AValue: Single);
@@ -200,7 +201,7 @@ type
     property PageMargin: Integer read FPageMargin write FPageMargin default 6;
     property PopupMenu;
     property PrintJobTitle: string read FPrintJobTitle write FPrintJobTitle;
-    property SearchHighlightAll: Boolean read FSearchHighlightAll write FSearchHighlightAll;
+    property SearchHighlightAll: Boolean read FSearchHighlightAll write SetSearchHighlightAll;
     property SearchMatchCase: Boolean read FSearchMatchCase write FSearchMatchCase;
     property SearchWholeWords: Boolean read FSearchWholeWords write FSearchWholeWords;
     property ZoomMode: TPDFZoomMode read FZoomMode write SetZoomMode default zmActualSize;
@@ -597,6 +598,13 @@ begin
   LZoom := FZoomPercent / 100 * Screen.PixelsPerInch / 72;
   HorzScrollBar.Range := Round(FWidth * LZoom) + FPageMargin * 2;
   VertScrollBar.Range := Round(FHeight * LZoom) + FPageMargin * (FPageCount + 1);
+end;
+
+procedure TPDFiumControl.SetSearchHighlightAll(const AValue: Boolean);
+begin
+  FSearchHighlightAll := AValue;
+
+  Invalidate;
 end;
 
 procedure TPDFiumControl.SetZoomPercent(const AValue: Single);
