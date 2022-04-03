@@ -696,6 +696,7 @@ var
   LCharIndex, LCharCount: Integer;
   LIndex, LPageIndex: Integer;
   LPage: TPDFPage;
+  LSearchText: string;
 begin
   Result := 0;
 
@@ -718,7 +719,11 @@ begin
 
       if not FSearchText.IsEmpty then
       begin
-        if LPage.BeginFind(FSearchText, FSearchMatchCase, FSearchWholeWords, False) then
+        LSearchText := FSearchText;
+        if not FSearchMatchCase then
+          LSearchText := LSearchText.ToLower; { Bug in PDFium }
+
+        if LPage.BeginFind(LSearchText, FSearchMatchCase, FSearchWholeWords, False) then
         try
           while LPage.FindNext(LCharIndex, LCharCount) do
           begin
