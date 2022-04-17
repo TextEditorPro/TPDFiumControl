@@ -737,6 +737,8 @@ begin
               SearchRects[LCount] := LPage.GetTextRect(LIndex);
               Inc(LCount);
             end;
+
+            Inc(Result);
           end;
         finally
           LPage.EndFind;
@@ -754,8 +756,6 @@ begin
                 Result := Trunc(ALeft.Left) - Trunc(ARight.Left);
             end)
           );
-
-        Inc(Result, LCount);
       end;
     end;
 
