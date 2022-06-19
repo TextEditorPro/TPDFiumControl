@@ -1578,39 +1578,8 @@ begin
 end;
 
 procedure TPDFiumControl.Print;
-var
-  LIndex: Integer;
-  LPage: TPDFPage;
-  LStream: TMemoryStream;
-  LPDFDocument: TPDFDocument;
 begin
-  LPDFDocument := CreatePDFDocument;
-  try
-    { Flatten pages. Needed for form field values. }
-    Screen.Cursor := crHourGlass;
-    LStream := TMemoryStream.Create;
-    try
-      FPDFDocument.SaveToStream(LStream); { Original }
-      LStream.Position := 0;
-
-      LPDFDocument.LoadFromStream(LStream);
-      for LIndex := 0 to FPageCount - 1 do
-      begin
-        LPage := LPDFDocument.Pages[LIndex];
-        FPDFPage_Flatten(LPage.Page, 1);
-      end;
-      LPDFDocument.SaveToStream(LStream);
-      LStream.Position := 0;
-      LPDFDocument.LoadFromStream(LStream);
-    finally
-      LStream.Free;
-      Screen.Cursor := crDefault;
-    end;
-
-    TPDFDocumentVclPrinter.PrintDocument(LPDFDocument, PrintJobTitle);
-  finally
-    LPDFDocument.Free;
-  end;
+  TPDFDocumentVclPrinter.PrintDocument(FPDFDocument, PrintJobTitle);
 end;
 
 procedure TPDFiumControl.Resize;
