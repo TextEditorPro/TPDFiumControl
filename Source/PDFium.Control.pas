@@ -177,6 +177,8 @@ type
     procedure ZoomToHeight;
     procedure ZoomToWidth;
     procedure Zoom(const APercent: Single);
+    // Edwin Yip (2023-02-05): Expose FPDFDocument (read-only)
+    function GetPDFDocument: TPDFDocument;
     property CurrentPage: TPDFPage read GetCurrentPage;
     property Filename: string read FFilename write FFilename;
     property OnPaint: TNotifyEvent read FOnPaint write FOnPaint;
@@ -512,6 +514,14 @@ end;
 
 procedure TPDFiumControl.AfterLoad;
 begin
+  // Edwin Yip (2023-02-05): Reset search related properties after loading another file
+  if SearchCount > 0 then
+  begin
+    SearchIndex := 0;
+    SearchCount := 0;
+    ClearSearch;
+  end;
+
   SetPageCount(FPDFDocument.PageCount);
   GetPageWebLinks;
   FChanged := True;
@@ -872,12 +882,16 @@ procedure TPDFiumControl.ClearSearch;
 var
   LIndex: Integer;
 begin
+  // Edwin Yip (2023-02-05): ClearSearch should also reset the control's search result count and index
+  SearchCount := 0;
+  SearchIndex := 0;
+
   if IsPageValid then
-  for LIndex := 0 to FPageCount - 1 do
-  begin
-    SetLength(FPageInfo[LIndex].SearchRects, 0);
-    FPageInfo[LIndex].SearchCurrentIndex := -1;
-  end;
+    for LIndex := 0 to FPageCount - 1 do
+    begin
+      SetLength(FPageInfo[LIndex].SearchRects, 0);
+      FPageInfo[LIndex].SearchCurrentIndex := -1;
+    end;
 end;
 
 procedure TPDFiumControl.SelectAll;
@@ -949,6 +963,9 @@ begin
     FChanged := True;
     if ASetScrollBar then
       VertScrollBar.Position := GetPageTop(AIndex);
+
+    // Edwin Yip (2023-02-05): Calls OnScroll when changing the position of the vertical scrollbar
+    DoScroll(sbVertical);
   end;
 end;
 
@@ -1862,7 +1879,13 @@ begin
     end;
   end;
 end;
+
 {$ENDIF}
+
+function TPDFiumControl.GetPDFDocument: TPDFDocument;
+begin
+  Result := FPDFDocument;
+end;
 
 { TPDFDocumentVclPrinter }
 
