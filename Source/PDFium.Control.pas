@@ -177,13 +177,12 @@ type
     procedure ZoomToHeight;
     procedure ZoomToWidth;
     procedure Zoom(const APercent: Single);
-    // Edwin Yip (2023-02-05): Expose FPDFDocument (read-only)
-    function GetPDFDocument: TPDFDocument;
     property CurrentPage: TPDFPage read GetCurrentPage;
     property Filename: string read FFilename write FFilename;
-    property OnPaint: TNotifyEvent read FOnPaint write FOnPaint;
     property OnLoadProtected: TPDFLoadProtectedEvent read FOnLoadProtected write FOnLoadProtected;
+    property OnPaint: TNotifyEvent read FOnPaint write FOnPaint;
     property OnScroll: TPDFControlScrollEvent read FOnScroll write FOnScroll;
+    property PDFDocument: TPDFDocument read FPDFDocument;
     property PageCount: Integer read FPageCount;
     property PageIndex: Integer read FPageIndex write SetPageIndex;
     property PageNumber: Integer read GetPageNumber write SetPageNumber;
@@ -436,8 +435,10 @@ begin
     if FPDF_GetLastError = FPDF_ERR_PASSWORD then
     begin
       LPassword := '';
+
       if Assigned(FOnLoadProtected) then
         FOnLoadProtected(Self, LPassword);
+
       try
         FPDFDocument.LoadFromFile(AFilename, LPassword);
       except
@@ -514,16 +515,11 @@ end;
 
 procedure TPDFiumControl.AfterLoad;
 begin
-  // Edwin Yip (2023-02-05): Reset search related properties after loading another file
-  if SearchCount > 0 then
-  begin
-    SearchIndex := 0;
-    SearchCount := 0;
-    ClearSearch;
-  end;
+  ClearSearch;
 
   SetPageCount(FPDFDocument.PageCount);
   GetPageWebLinks;
+
   FChanged := True;
   Invalidate;
 end;
@@ -882,16 +878,15 @@ procedure TPDFiumControl.ClearSearch;
 var
   LIndex: Integer;
 begin
-  // Edwin Yip (2023-02-05): ClearSearch should also reset the control's search result count and index
   SearchCount := 0;
   SearchIndex := 0;
 
   if IsPageValid then
-    for LIndex := 0 to FPageCount - 1 do
-    begin
-      SetLength(FPageInfo[LIndex].SearchRects, 0);
-      FPageInfo[LIndex].SearchCurrentIndex := -1;
-    end;
+  for LIndex := 0 to FPageCount - 1 do
+  begin
+    SetLength(FPageInfo[LIndex].SearchRects, 0);
+    FPageInfo[LIndex].SearchCurrentIndex := -1;
+  end;
 end;
 
 procedure TPDFiumControl.SelectAll;
@@ -941,8 +936,10 @@ var
   LPageIndex: Integer;
 begin
   LPageIndex := APageIndex;
-  Result := LPageIndex * FPageMargin;
   LY := 0;
+
+  Result := LPageIndex * FPageMargin;
+
   while LPageIndex > 0 do
   begin
     Dec(LPageIndex);
@@ -961,10 +958,10 @@ begin
   begin
     PageIndex := AIndex;
     FChanged := True;
+
     if ASetScrollBar then
       VertScrollBar.Position := GetPageTop(AIndex);
 
-    // Edwin Yip (2023-02-05): Calls OnScroll when changing the position of the vertical scrollbar
     DoScroll(sbVertical);
   end;
 end;
@@ -1882,11 +1879,6 @@ end;
 
 {$ENDIF}
 
-function TPDFiumControl.GetPDFDocument: TPDFDocument;
-begin
-  Result := FPDFDocument;
-end;
-
 { TPDFDocumentVclPrinter }
 
 function VclAbortProc(Prn: HDC; Error: Integer): Bool; stdcall;
@@ -1905,10 +1897,12 @@ function TPDFDocumentVclPrinter.PrinterStartDoc(const AJobTitle: string): Boolea
 begin
   Result := False;
   FPagePrinted := False;
+
   if not Printer.Printing then
   begin
     if AJobTitle <> '' then
       Printer.Title := AJobTitle;
+
     Printer.BeginDoc;
     FBeginDocCalled := Printer.Printing;
     Result := FBeginDocCalled;
