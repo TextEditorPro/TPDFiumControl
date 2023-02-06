@@ -177,6 +177,13 @@ type
     procedure ZoomToHeight;
     procedure ZoomToWidth;
     procedure Zoom(const APercent: Single);
+    // Search in the given page only.
+    // - This is useful in scenario when you one to highlight matching strings in a single page only (as
+    //   opposed to searching/highliting in all pages which takes much more time for large pdf files).
+    function SearchAllInPage(const aPageIndex: Integer; const ASearchText: string; const AHighlightAll,
+        AMatchCase, AWholeWords: Boolean; const aScrollIntoView: Boolean = True): Integer; overload;
+    // Return true if the given page index is valid
+    function IsPageIndexValid(const aPageIndex: Integer): Boolean;
     property CurrentPage: TPDFPage read GetCurrentPage;
     property Filename: string read FFilename write FFilename;
     property OnLoadProtected: TPDFLoadProtectedEvent read FOnLoadProtected write FOnLoadProtected;
@@ -1876,8 +1883,97 @@ begin
     end;
   end;
 end;
-
 {$ENDIF}
+
+function TPDFiumControl.SearchAllInPage(const aPageIndex: Integer; const ASearchText: string; const
+    AHighlightAll, AMatchCase, AWholeWords: Boolean; const aScrollIntoView: Boolean = True): Integer;
+var
+  LCount, LRectCount: Integer;
+  LCharIndex, LCharCount: Integer;
+  LIndex: Integer;
+  LPage: TPDFPage;
+  LSearchText: string;
+begin
+  Result := 0;
+
+  FSearchText := ASearchText;
+  FSearchHighlightAll := AHighlightAll;
+  FSearchMatchCase := AMatchCase;
+  FSearchWholeWords := AWholeWords;
+
+  ClearSearch;
+  FSearchIndex := 0;
+
+  if IsPageValid then
+  begin
+    with FPageInfo[aPageIndex] do
+    begin
+      LPage := FPDFDocument.Pages[aPageIndex];
+      LCount := 0;
+
+      if not FSearchText.IsEmpty then
+      begin
+        LSearchText := FSearchText;
+        if not FSearchMatchCase then
+          LSearchText := LSearchText.ToLower; { Bug in PDFium }
+
+        if LPage.BeginFind(LSearchText, FSearchMatchCase, FSearchWholeWords, False) then
+        try
+          while LPage.FindNext(LCharIndex, LCharCount) do
+          begin
+            LRectCount := LPage.GetTextRectCount(LCharIndex, LCharCount);
+
+            if LCount + LRectCount > Length(SearchRects) then
+              SetLength(SearchRects, (LCount + LRectCount) * 2);
+
+            for LIndex := 0 to LRectCount - 1 do
+            begin
+              SearchRects[LCount] := LPage.GetTextRect(LIndex);
+              Inc(LCount);
+            end;
+
+            Inc(Result);
+          end;
+        finally
+          LPage.EndFind;
+        end;
+
+        if LCount <> Length(SearchRects) then
+          SetLength(SearchRects, LCount);
+
+        if Length(SearchRects) > 0 then
+          TArray.Sort<TPDFRect>(SearchRects, TComparer<TPDFRect>.Construct(
+            function (const ALeft, ARight: TPDFRect): Integer
+            begin
+              Result := Trunc(ARight.Top) - Trunc(ALeft.Top);
+              if Result = 0 then
+                Result := Trunc(ALeft.Left) - Trunc(ARight.Left);
+            end)
+          );
+      end;
+    end;
+
+    with FPageInfo[aPageIndex] do
+    if Length(SearchRects) > 0 then
+    begin
+      SearchCurrentIndex := 0;
+      if aScrollIntoView then
+      begin
+        GotoPage(aPageIndex, False);
+        AdjustScrollBar(aPageIndex);
+      end;
+    end;
+  end;
+
+  FSearchCount := Result;
+  Invalidate;
+end;
+
+function TPDFiumControl.IsPageIndexValid(const aPageIndex: Integer): Boolean;
+begin
+  Result := (aPageIndex >= 0) and (aPageIndex < PageCount - 1);
+end;
+
 
 { TPDFDocumentVclPrinter }
 
