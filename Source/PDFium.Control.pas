@@ -144,7 +144,7 @@ type
     destructor Destroy; override;
     function FindNext: Integer;
     function FindPrevious: Integer;
-    function IsPageIndexValid(const APageIndex: Integer): Boolean;
+    function IsPageIndexValid(const APageIndex: Integer): Boolean; inline;
     function IsTextSelected: Boolean;
     function SearchAll: Integer; overload;
     function SearchAll(const ASearchText: string): Integer; overload;
@@ -233,9 +233,6 @@ uses
   Vcl.Printers
 {$IFDEF USE_LOAD_FROM_URL}, IdHTTP, IdSSLOpenSSL{$ENDIF}
 {$IFDEF ALPHASKINS}, sConst, sDialogs, sMessages, sStyleSimply, sVCLUtils{$ENDIF};
-
-const
-  cDefaultScrollOffset = 50;
 
 { TPDFPage }
 
@@ -354,7 +351,7 @@ end;
 
 function TPDFiumControl.IsPageValid: Boolean;
 begin
-  Result := FPDFDocument.Active and (PageIndex >= 0) and (PageIndex < PageCount);
+  Result := FPDFDocument.Active and IsPageIndexValid(PageIndex);
 end;
 
 function TPDFiumControl.GetCurrentPage: TPDFPage;
@@ -409,6 +406,7 @@ begin
     LPageIndex := LIndex - 1;
     Break;
   end;
+
   PageIndex := Max(LPageIndex, 0);
 end;
 
@@ -572,7 +570,8 @@ var
 begin
   LValue := AValue;
   Dec(LValue);
-  if (LValue >= 0) and (LValue < FPageCount) and (FPageIndex <> LValue) then
+
+  if IsPageIndexValid(LValue) and (FPageIndex <> LValue) then
   begin
     FPageIndex := LValue;
     FChanged := True;
@@ -595,6 +594,7 @@ begin
   FSelectionStartCharIndex := 0;
   FSelectionStopCharIndex := 0;
   FSelectionActive := False;
+
   GetPageWebLinks;
 end;
 
@@ -603,6 +603,7 @@ var
   LZoom: Single;
 begin
   LZoom := FZoomPercent / 100 * Screen.PixelsPerInch / 72;
+
   HorzScrollBar.Range := Round(FWidth * LZoom) + FPageMargin * 2;
   VertScrollBar.Range := Round(FHeight * LZoom) + FPageMargin * (FPageCount + 1);
 end;
@@ -963,7 +964,7 @@ begin
   if FPageIndex = AIndex then
     Exit;
 
-  if (AIndex >= 0) and (AIndex < FPageCount) then
+  if IsPageIndexValid(AIndex) then
   begin
     PageIndex := AIndex;
     FChanged := True;
@@ -991,12 +992,14 @@ begin
   LTop := 0;
   LMargin := FPageMargin;
   LScale := FZoomPercent / 100 * Screen.PixelsPerInch / 72;
+
   for LIndex := 0 to FPageCount - 1 do
   begin
     LRect.Top := Round(LTop * LScale) + LMargin - VertScrollBar.Position;
     LRect.Left := FPageMargin + Round((FWidth - FPageInfo[LIndex].Width) / 2 * LScale) - HorzScrollBar.Position;
     LRect.Width := Round(FPageInfo[LIndex].Width * LScale);
     LRect.Height := Round(FPageInfo[LIndex].Height * LScale);
+
     if LRect.Width < LClient.Width - 2 * FPageMargin then
       LRect.Offset((LClient.Width - LRect.Width) div 2 - LRect.Left, 0);
 
@@ -1050,8 +1053,10 @@ begin
     begin
       LCount := CurrentPage.GetTextRectCount(SelectionStart, SelectionLength);
       SetLength(Result, LCount);
+
       for LIndex := 0 to LCount - 1 do
         Result[LIndex] := InternPageToDevice(LPage, LPage.GetTextRect(LIndex), FPageInfo[FPageIndex].Rect);
+
       Exit;
     end;
   end;
@@ -1124,7 +1129,7 @@ begin
     LCharIndex := ACharIndex;
     if (LCharIndex >= 0) and (LCharIndex < LCharCount) then
     begin
-      while (LCharIndex < LCharCount) and CurrentPage.ReadChar(LCharIndex).IsWhiteSpace do
+      while (LCharIndex < LCharCount) and IsWhiteSpace(CurrentPage.ReadChar(LCharIndex)) do
         Inc(LCharIndex);
 
       if LCharIndex < LCharCount then
@@ -1133,7 +1138,7 @@ begin
         while LStartCharIndex >= 0 do
         begin
           LChar := CurrentPage.ReadChar(LStartCharIndex);
-          if LChar.IsWhiteSpace then
+          if IsWhiteSpace(LChar) then
             Break;
 
           Dec(LStartCharIndex);
@@ -1145,7 +1150,7 @@ begin
         while LStopCharIndex < LCharCount do
         begin
           LChar := CurrentPage.ReadChar(LStopCharIndex);
-          if LChar.IsWhiteSpace then
+          if IsWhiteSpace(LChar) then
             Break;
 
           Inc(LStopCharIndex);
@@ -1170,6 +1175,7 @@ begin
   if AButton = mbLeft then
   begin
     SetFocus;
+
     FMousePressed := True;
     FMouseDownPoint := Point(X, Y); // used to find out if the selection must be cleared or not
   end;
@@ -1273,6 +1279,7 @@ var
   LPage: TPDFPage;
 begin
   LPage := CurrentPage;
+
   if Assigned(LPage) then
   with FPageInfo[FPageIndex] do
     Result := LPage.DeviceToPage(Rect.Left, Rect.Top, Rect.Width, Rect.Height, X, Y, Rotation)
@@ -1287,14 +1294,17 @@ var
   LPage: TPDFPage;
 begin
   LPage := CurrentPage;
+
   if Assigned(LPage) then
   begin
     LLinkCount := LPage.GetWebLinkCount;
     SetLength(FWebLinksRects, LLinkCount);
+
     for LLinkIndex := 0 to LLinkCount - 1 do
     begin
       LRectCount := LPage.GetWebLinkRectCount(LLinkIndex);
       SetLength(FWebLinksRects[LLinkIndex], LRectCount);
+
       for LRectIndex := 0 to LRectCount - 1 do
         FWebLinksRects[LLinkIndex][LRectIndex] := LPage.GetWebLinkRect(LLinkIndex, LRectIndex);
     end;
@@ -1348,7 +1358,9 @@ end;
 procedure TPDFiumControl.WMPaint(var AMessage: TWMPaint);
 begin
   ControlState := ControlState + [csCustomPaint];
+
   inherited;
+
   ControlState := ControlState - [csCustomPaint];
 end;
 
@@ -1357,7 +1369,7 @@ var
   LScale: Single;
   LZoom1, LZoom2: Single;
 begin
-  if FPageIndex < 0 then
+  if not IsPageIndexValid(FPageIndex) then
     Exit(100);
 
   LScale := 72 / Screen.PixelsPerInch;
@@ -1372,7 +1384,7 @@ function TPDFiumControl.PageWidthZoomPercent: Single;
 var
   LScale: Single;
 begin
-  if FPageIndex < 0 then
+  if not IsPageIndexValid(FPageIndex) then
     Exit(100);
 
   LScale := 72 / Screen.PixelsPerInch;
@@ -1388,7 +1400,9 @@ var
 begin
   LPoint := DeviceToPage(X, Y);
   LCharIndex := CurrentPage.GetCharIndexAt(LPoint.X, LPoint.Y, MAXWORD, MAXWORD);
+
   Result := LCharIndex >= 0;
+
   if not Result then
     LCharIndex := FSelectionStopCharIndex;
 
@@ -1614,9 +1628,9 @@ begin
   Invalidate;
 end;
 
-function TPDFiumControl.IsPageIndexValid(const aPageIndex: Integer): Boolean;
+function TPDFiumControl.IsPageIndexValid(const APageIndex: Integer): Boolean;
 begin
-  Result := (aPageIndex >= 0) and (aPageIndex < PageCount - 1);
+  Result := (APageIndex >= 0) and (APageIndex < FPageCount);
 end;
 
 function TPDFiumControl.IsTextSelected: Boolean;
@@ -1732,11 +1746,14 @@ var
   LResult: Boolean;
 begin
   LResult := ShellExecute(0, 'open', PChar(AURL), nil, nil, SW_NORMAL) > 32;
+
   if not LResult then
     ShowError(SysErrorMessage(GetLastError));
 end;
 
 procedure TPDFiumControl.KeyDown(var Key: Word; Shift: TShiftState);
+const
+  DefaultScrollOffset = 50;
 begin
   inherited KeyDown(Key, Shift);
 
@@ -1747,34 +1764,28 @@ begin
 
   case Key of
     Ord('C'), VK_INSERT:
-      if AllowTextSelection then
+      if AllowTextSelection and (Shift = [ssCtrl]) then
       begin
-        if Shift = [ssCtrl] then
-        begin
-          if FSelectionActive then
-            CopyToClipboard;
-          Key := 0;
-        end
-      end;
+        if FSelectionActive then
+          CopyToClipboard;
 
+        Key := 0;
+      end;
     Ord('A'):
-      if AllowTextSelection then
+      if AllowTextSelection and (Shift = [ssCtrl]) then
       begin
-        if Shift = [ssCtrl] then
-        begin
-          SelectAll;
-          Key := 0;
-        end;
-      end;
+        SelectAll;
 
+        Key := 0;
+      end;
     VK_RIGHT:
-      HorzScrollBar.Position := HorzScrollBar.Position - cDefaultScrollOffset;
+      HorzScrollBar.Position := HorzScrollBar.Position - DefaultScrollOffset;
     VK_LEFT:
-      HorzScrollBar.Position := HorzScrollBar.Position + cDefaultScrollOffset;
+      HorzScrollBar.Position := HorzScrollBar.Position + DefaultScrollOffset;
     VK_UP:
-      VertScrollBar.Position := VertScrollBar.Position - cDefaultScrollOffset;
+      VertScrollBar.Position := VertScrollBar.Position - DefaultScrollOffset;
     VK_DOWN:
-      VertScrollBar.Position := VertScrollBar.Position + cDefaultScrollOffset;
+      VertScrollBar.Position := VertScrollBar.Position + DefaultScrollOffset;
     VK_PRIOR:
       GotoPreviousPage;
     VK_NEXT:
@@ -1909,6 +1920,7 @@ end;
 function TPDFDocumentVclPrinter.PrinterStartDoc(const AJobTitle: string): Boolean;
 begin
   Result := False;
+
   FPagePrinted := False;
 
   if not Printer.Printing then
