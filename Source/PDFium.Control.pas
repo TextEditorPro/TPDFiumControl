@@ -144,7 +144,7 @@ type
     destructor Destroy; override;
     function FindNext: Integer;
     function FindPrevious: Integer;
-    function IsPageIndexValid(const APageIndex: Integer): Boolean; inline;
+    function IsPageIndexValid(const APageIndex: Integer): Boolean;
     function IsTextSelected: Boolean;
     function SearchAll: Integer; overload;
     function SearchAll(const ASearchText: string): Integer; overload;
@@ -351,7 +351,7 @@ end;
 
 function TPDFiumControl.IsPageValid: Boolean;
 begin
-  Result := FPDFDocument.Active and IsPageIndexValid(PageIndex);
+  Result := IsPageIndexValid(PageIndex);
 end;
 
 function TPDFiumControl.GetCurrentPage: TPDFPage;
@@ -1129,7 +1129,7 @@ begin
     LCharIndex := ACharIndex;
     if (LCharIndex >= 0) and (LCharIndex < LCharCount) then
     begin
-      while (LCharIndex < LCharCount) and IsWhiteSpace(CurrentPage.ReadChar(LCharIndex)) do
+      while (LCharIndex < LCharCount) and CurrentPage.ReadChar(LCharIndex).IsWhiteSpace do
         Inc(LCharIndex);
 
       if LCharIndex < LCharCount then
@@ -1138,7 +1138,7 @@ begin
         while LStartCharIndex >= 0 do
         begin
           LChar := CurrentPage.ReadChar(LStartCharIndex);
-          if IsWhiteSpace(LChar) then
+          if LChar.IsWhiteSpace then
             Break;
 
           Dec(LStartCharIndex);
@@ -1150,7 +1150,7 @@ begin
         while LStopCharIndex < LCharCount do
         begin
           LChar := CurrentPage.ReadChar(LStopCharIndex);
-          if IsWhiteSpace(LChar) then
+          if LChar.IsWhiteSpace then
             Break;
 
           Inc(LStopCharIndex);
@@ -1630,7 +1630,7 @@ end;
 
 function TPDFiumControl.IsPageIndexValid(const APageIndex: Integer): Boolean;
 begin
-  Result := (APageIndex >= 0) and (APageIndex < FPageCount);
+  Result := FPDFDocument.Active and (APageIndex >= 0) and (APageIndex < FPageCount);
 end;
 
 function TPDFiumControl.IsTextSelected: Boolean;
