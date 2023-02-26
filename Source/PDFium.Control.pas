@@ -1217,6 +1217,9 @@ var
 begin
   inherited MouseMove(AShift, X, Y);
 
+  if not FPDFDocument.Active then
+    Exit;
+
   LPageIndex := GetPageIndexAt(Point(X, Y));
 
   if LPageIndex <> FPageIndex then
@@ -1616,7 +1619,12 @@ end;
 
 procedure TPDFiumControl.Print;
 begin
-  TPDFDocumentVclPrinter.PrintDocument(FPDFDocument, PrintJobTitle);
+  try
+    TPDFDocumentVclPrinter.PrintDocument(FPDFDocument, PrintJobTitle);
+  except
+    on E: Exception do
+      ShowError(E.Message);
+  end;
 end;
 
 procedure TPDFiumControl.Resize;
