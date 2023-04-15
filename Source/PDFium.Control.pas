@@ -6,7 +6,7 @@ interface
 
 uses
   Winapi.Messages, Winapi.Windows, System.Classes, System.Math, System.SysUtils, System.UITypes, System.Variants,
-  Vcl.Controls, Vcl.Dialogs, Vcl.ExtCtrls, Vcl.Forms, Vcl.Graphics, PDFiumCore, PDFiumLib
+  Vcl.Controls, Vcl.Dialogs, Vcl.ExtCtrls, Vcl.Forms, Vcl.Graphics, Vcl.Grids, PDFiumCore, PDFiumLib
 {$IFDEF ALPHASKINS}, acSBUtils, sCommonData{$ENDIF};
 
 type
@@ -45,6 +45,7 @@ type
     FMouseDownPoint: TPoint;
     FMousePressed: Boolean;
     FOnLoadProtected: TPDFLoadProtectedEvent;
+    FOnPageChanged: TNotifyEvent;
     FOnPaint: TNotifyEvent;
     FOnScroll: TPDFControlScrollEvent;
     FPageBorderColor: TColor;
@@ -83,7 +84,7 @@ type
     function GetSelectionText: string;
     function GetWebLinkIndex(const X, Y: Integer): Integer;
     function InternPageToDevice(const APage: TPDFPage; const APageRect: TPDFRect; const ARect: TRect): TRect;
-    function IsPageValid: Boolean;
+    function IsCurrentPageValid: Boolean;
     function IsWebLinkAt(const X, Y: Integer): Boolean; overload;
     function IsWebLinkAt(const X, Y: Integer; var AURL: string): Boolean; overload;
     function PageHeightZoomPercent: Single;
@@ -104,7 +105,7 @@ type
     procedure PageChanged;
     procedure PaintAlphaSelection(ADC: HDC; const APage: TPDFPage; const ARects: TPDFControlPDFRectArray; const AIndex: Integer;
       const AColor: TColor = TColors.SysNone);
-    procedure PaintPage(ADC: HDC; const APage: TPDFPage; const AIndex: Integer);
+    procedure PaintPage(ADC: HDC; const APage: TPDFPage; const AIndex: Integer); overload;
     procedure PaintPageBorder(ADC: HDC; const ARect: TRect);
     procedure PaintPageSearchResults(ADC: HDC; const APage: TPDFPage; const AIndex: Integer);
     procedure PaintPageSelection(ADC: HDC; const APage: TPDFPage; const AIndex: Integer);
@@ -142,6 +143,7 @@ type
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
+    function GetPage(const AIndex: Integer): TPDFPage;
     function FindNext: Integer;
     function FindPrevious: Integer;
     function IsPageIndexValid(const APageIndex: Integer): Boolean;
@@ -166,6 +168,7 @@ type
 {$IFDEF USE_LOAD_FROM_URL}
     procedure LoadFromURL(const AURL: string);
 {$ENDIF}
+    procedure PaintPage(ADC: HDC; const ARect: TRect; const AIndex: Integer); overload;
     procedure Print;
     procedure RotatePageClockwise;
     procedure RotatePageCounterClockwise;
@@ -180,9 +183,6 @@ type
     procedure Zoom(const APercent: Single);
     property CurrentPage: TPDFPage read GetCurrentPage;
     property Filename: string read FFilename write FFilename;
-    property OnLoadProtected: TPDFLoadProtectedEvent read FOnLoadProtected write FOnLoadProtected;
-    property OnPaint: TNotifyEvent read FOnPaint write FOnPaint;
-    property OnScroll: TPDFControlScrollEvent read FOnScroll write FOnScroll;
     property PDFDocument: TPDFDocument read FPDFDocument;
     property PageCount: Integer read FPageCount;
     property PageIndex: Integer read FPageIndex write SetPageIndex;
@@ -197,17 +197,57 @@ type
     property SkinData: TsScrollWndData read FSkinData write FSkinData;
 {$ENDIF}
   published
+    property Align;
     property AllowTextSelection: Boolean read FAllowTextSelection write FAllowTextSelection default True;
     property Color;
-    property PageBorderColor: TColor read FPageBorderColor write FPageBorderColor default clSilver;
+    property OnLoadProtected: TPDFLoadProtectedEvent read FOnLoadProtected write FOnLoadProtected;
+    property OnPageChanged: TNotifyEvent read FOnPageChanged write FOnPageChanged;
+    property OnPaint: TNotifyEvent read FOnPaint write FOnPaint;
+    property OnScroll: TPDFControlScrollEvent read FOnScroll write FOnScroll;
+    property PageBorderColor: TColor read FPageBorderColor write FPageBorderColor default TColors.Silver;
     property PageMargin: Integer read FPageMargin write FPageMargin default 6;
     property PopupMenu;
     property PrintJobTitle: string read FPrintJobTitle write FPrintJobTitle;
     property SearchHighlightAll: Boolean read FSearchHighlightAll write SetSearchHighlightAll;
     property SearchMatchCase: Boolean read FSearchMatchCase write FSearchMatchCase;
     property SearchWholeWords: Boolean read FSearchWholeWords write FSearchWholeWords;
+    property Visible;
     property ZoomMode: TPDFZoomMode read FZoomMode write SetZoomMode default zmActualSize;
     property ZoomPercent: Single read FZoomPercent write SetZoomPercent;
+  end;
+
+  TPDFiumControlThumbnails = class(TDrawGrid)
+  private
+    FDefaultSizeSet: Boolean;
+    FHackedMousedown: Boolean;
+    FPDFiumControl: TPDFiumControl;
+{$IFDEF ALPHASKINS}
+    FScrollWnd: TacScrollWnd;
+    FSkinData: TsScrollWndData;
+{$ENDIF}
+    FTimerStarted: Boolean;
+    procedure DoPDFiumControlPageChanged(Sender: TObject);
+    procedure SetDefaultSize;
+    procedure SetPDFiumControl(const AValue: TPDFiumControl);
+  protected
+    function SelectCell(ACol, ARow: Longint): Boolean; override;
+    procedure DrawCell(ACol, ARow: Longint; ARect: TRect; AState: TGridDrawState); override;
+{$IFDEF ALPHASKINS}
+    procedure Loaded; override;
+{$ENDIF}
+    procedure MouseDown(Button: TMouseButton; Shift: TShiftState; X: Integer; Y: Integer); override;
+    procedure MouseMove(Shift: TShiftState; X: Integer; Y: Integer); override;
+    procedure Resize; override;
+  published
+    property PDFiumControl: TPDFiumControl read FPDFiumControl write SetPDFiumControl;
+  public
+    constructor Create(AOwner: TComponent); override;
+    destructor Destroy; override;
+{$IFDEF ALPHASKINS}
+    procedure AfterConstruction; override;
+    procedure WndProc(var AMessage: TMessage); override;
+    property SkinData: TsScrollWndData read FSkinData write FSkinData;
+{$ENDIF}
   end;
 
   TPDFDocumentVclPrinter = class(TPDFDocumentPrinter)
@@ -269,7 +309,7 @@ begin
   ParentBackground := False;
   ParentColor := False;
   Color := clWhite;
-  FPageBorderColor := clSilver;
+  FPageBorderColor := TColors.Silver;
   TabStop := True;
   Width := 200;
   Height := 250;
@@ -326,14 +366,105 @@ begin
 
   UpdateData(FSkinData);
 end;
-{$ENDIF}
 
-{$IFDEF ALPHASKINS}
 procedure TPDFiumControl.Loaded;
 begin
   inherited Loaded;
 
   FSkinData.Loaded(False);
+end;
+
+procedure TPDFiumControl.WndProc(var AMessage: TMessage);
+var
+  LPaintStruct: TPaintStruct;
+begin
+  if AMessage.Msg = SM_ALPHACMD then
+    case AMessage.WParamHi of
+      AC_CTRLHANDLED:
+        begin
+          AMessage.Result := 1;
+          Exit;
+        end;
+      AC_SETNEWSKIN:
+        if ACUInt(AMessage.LParam) = ACUInt(SkinData.SkinManager) then
+        begin
+          CommonMessage(AMessage, FSkinData);
+          Exit;
+        end;
+      AC_REMOVESKIN:
+        if ACUInt(AMessage.LParam) = ACUInt(SkinData.SkinManager) then
+        begin
+          if Assigned(FScrollWnd) then
+          begin
+            FreeAndNil(FScrollWnd);
+            RecreateWnd;
+          end;
+          Exit;
+        end;
+      AC_REFRESH:
+        if RefreshNeeded(SkinData, AMessage) then
+        begin
+          RefreshEditScrolls(SkinData, FScrollWnd);
+          CommonMessage(AMessage, FSkinData);
+          if HandleAllocated and Visible then
+            RedrawWindow(Handle, nil, 0, RDWA_REPAINT);
+          Exit;
+        end;
+      AC_GETDEFSECTION:
+        begin
+          AMessage.Result := 1;
+          Exit;
+        end;
+      AC_GETDEFINDEX:
+        begin
+          if Assigned(FSkinData.SkinManager) then
+            AMessage.Result := FSkinData.SkinManager.SkinCommonInfo.Sections[ssEdit] + 1;
+          Exit;
+        end;
+      AC_SETGLASSMODE:
+        begin
+          CommonMessage(AMessage, FSkinData);
+          Exit;
+        end;
+    end;
+
+  if not ControlIsReady(Self) or not Assigned(FSkinData) or not FSkinData.Skinned then
+    inherited
+  else
+  begin
+    case AMessage.Msg of
+      WM_ERASEBKGND:
+        if (SkinData.SkinIndex >= 0) and InUpdating(FSkinData) then
+          Exit;
+      WM_PAINT:
+        begin
+          if InUpdating(FSkinData) then
+          begin
+            BeginPaint(Handle, LPaintStruct);
+            EndPaint(Handle, LPaintStruct);
+          end
+          else
+            inherited;
+
+          Exit;
+        end;
+    end;
+
+    if CommonWndProc(AMessage, FSkinData) then
+      Exit;
+
+    inherited;
+
+    case AMessage.Msg of
+      CM_SHOWINGCHANGED:
+        RefreshEditScrolls(SkinData, FScrollWnd);
+      CM_VISIBLECHANGED, CM_ENABLEDCHANGED, WM_SETFONT:
+        FSkinData.Invalidate;
+      CM_TEXTCHANGED, CM_CHANGED:
+        if Assigned(FScrollWnd) then
+          UpdateScrolls(FScrollWnd, True);
+    end;
+  end;
 end;
 {$ENDIF}
 
@@ -349,17 +480,14 @@ begin
   AMessage.Result := AMessage.Result or DLGC_WANTARROWS;
 end;
 
-function TPDFiumControl.IsPageValid: Boolean;
+function TPDFiumControl.IsCurrentPageValid: Boolean;
 begin
   Result := IsPageIndexValid(PageIndex);
 end;
 
 function TPDFiumControl.GetCurrentPage: TPDFPage;
 begin
-  if IsPageValid then
-    Result := FPDFDocument.Pages[PageIndex]
-  else
-    Result := nil;
+  Result := GetPage(PageIndex);
 end;
 
 procedure TPDFiumControl.DoScroll(const AScrollBarKind: TScrollBarKind);
@@ -544,6 +672,7 @@ begin
     for LIndex := 0 to FPageCount - 1 do
     begin
       LPage := FPDFDocument.Pages[LIndex];
+
       with FPageInfo[LIndex] do
       begin
         Width := LPage.Width;
@@ -586,6 +715,9 @@ begin
   begin
     FPageIndex := AValue;
     PageChanged;
+
+    if Assigned(FOnPageChanged) then
+      FOnPageChanged(Self);
   end;
 end;
 
@@ -642,6 +774,7 @@ procedure TPDFiumControl.DoSizeChanged;
 begin
   FChanged := True;
   Invalidate;
+
   if Assigned(OnResize) then
     OnResize(Self);
 end;
@@ -717,7 +850,7 @@ begin
   ClearSearch;
   FSearchIndex := 0;
 
-  if IsPageValid then
+  if IsCurrentPageValid then
   begin
     LFromPage := IfThen(APageIndex = -1, 0, APageIndex);
     LToPage := IfThen(APageIndex = -1, FPageCount - 1, APageIndex);
@@ -790,6 +923,14 @@ begin
   FSearchCount := Result;
 
   Invalidate;
+end;
+
+function TPDFiumControl.GetPage(const AIndex: Integer): TPDFPage;
+begin
+  if IsPageIndexValid(AIndex) then
+    Result := FPDFDocument.Pages[AIndex]
+  else
+    Result := nil;
 end;
 
 function TPDFiumControl.FindNext: Integer;
@@ -891,7 +1032,7 @@ begin
   SearchCount := 0;
   SearchIndex := 0;
 
-  if IsPageValid then
+  if IsCurrentPageValid then
   for LIndex := 0 to FPageCount - 1 do
   begin
     SetLength(FPageInfo[LIndex].SearchRects, 0);
@@ -906,7 +1047,7 @@ end;
 
 procedure TPDFiumControl.SelectText(const ACharIndex: Integer; const ACount: Integer);
 begin
-  if (ACount = 0) or not IsPageValid then
+  if (ACount = 0) or not IsCurrentPageValid then
     ClearSelection
   else
   begin
@@ -1018,7 +1159,7 @@ end;
 
 function TPDFiumControl.GetSelectionText: string;
 begin
-  if FSelectionActive and IsPageValid then
+  if FSelectionActive and IsCurrentPageValid then
     Result := CurrentPage.ReadText(SelectionStart, SelectionLength)
   else
     Result := '';
@@ -1026,7 +1167,7 @@ end;
 
 function TPDFiumControl.GetSelectionLength: Integer;
 begin
-  if FSelectionActive and IsPageValid then
+  if FSelectionActive and IsCurrentPageValid then
     Result := Abs(FSelectionStartCharIndex - FSelectionStopCharIndex) + 1
   else
     Result := 0;
@@ -1034,7 +1175,7 @@ end;
 
 function TPDFiumControl.GetSelectionStart: Integer;
 begin
-  if FSelectionActive and IsPageValid then
+  if FSelectionActive and IsCurrentPageValid then
     Result := Min(FSelectionStartCharIndex, FSelectionStopCharIndex)
   else
     Result := 0;
@@ -1180,7 +1321,7 @@ begin
     FMouseDownPoint := Point(X, Y); // used to find out if the selection must be cleared or not
   end;
 
-  if IsPageValid and AllowTextSelection and not FFormFieldFocused then
+  if IsCurrentPageValid and AllowTextSelection and not FFormFieldFocused then
   begin
     if AButton = mbLeft then
     begin
@@ -1240,7 +1381,7 @@ begin
           end;
       end
       else
-      if IsPageValid then
+      if IsCurrentPageValid then
       begin
         LPoint := DeviceToPage(X, Y);
         if IsWebLinkAt(X, Y) then
@@ -1513,6 +1654,14 @@ begin
 
     PaintAlphaSelection(ADC, APage, LRects, AIndex);
   end;
+end;
+
+procedure TPDFiumControl.PaintPage(ADC: HDC; const ARect: TRect; const AIndex: Integer);
+var
+  LPage: TPDFPage;
+begin
+  LPage := FPDFDocument.Pages[AIndex];
+  LPage.Draw(ADC, ARect.Left, ARect.Top, ARect.Width, ARect.Height, FPageInfo[AIndex].Rotation, []);
 end;
 
 procedure TPDFiumControl.PaintPageSearchResults(ADC: HDC; const APage: TPDFPage; const AIndex: Integer);
@@ -1816,8 +1965,69 @@ begin
   end;
 end;
 
+{ TPDFiumControlThumbnails }
+
+constructor TPDFiumControlThumbnails.Create(AOwner: TComponent);
+begin
+  inherited Create(AOwner);
+
 {$IFDEF ALPHASKINS}
-procedure TPDFiumControl.WndProc(var AMessage: TMessage);
+  FSkinData := TsScrollWndData.Create(Self, True);
+  FSkinData.COC := COC_TsDBGrid;
+  FSkinData.CustomFont := True;
+  StyleElements := [seBorder];
+{$ENDIF}
+  BorderStyle := bsNone;
+  ColCount := 1;
+  Color := TColors.SysWindow;
+  DefaultDrawing := False;
+  DoubleBuffered := True;
+  FDefaultSizeSet := False;
+  FixedCols := 0;
+  FixedRows := 0;
+  Options := [goFixedVertLine, goFixedHorzLine, goVertLine, goRowSelect, goThumbTracking];
+  ScrollBars := System.UITypes.TScrollStyle.ssVertical;
+  Width := 180;
+end;
+
+destructor TPDFiumControlThumbnails.Destroy;
+begin
+{$IFDEF ALPHASKINS}
+  if Assigned(FScrollWnd) then
+  begin
+    FScrollWnd.Free;
+    FScrollWnd := nil;
+  end;
+
+  if Assigned(FSkinData) then
+  begin
+    FSkinData.Free;
+    FSkinData := nil;
+  end;
+{$ENDIF}
+
+  inherited;
+end;
+
+{$IFDEF ALPHASKINS}
+procedure TPDFiumControlThumbnails.AfterConstruction;
+begin
+  inherited AfterConstruction;
+
+  if HandleAllocated then
+    RefreshEditScrolls(SkinData, FScrollWnd);
+
+  UpdateData(FSkinData);
+end;
+
+procedure TPDFiumControlThumbnails.Loaded;
+begin
+  inherited Loaded;
+
+  FSkinData.Loaded(False);
+end;
+
+procedure TPDFiumControlThumbnails.WndProc(var AMessage: TMessage);
 var
   LPaintStruct: TPaintStruct;
 begin
@@ -1910,6 +2120,176 @@ begin
   end;
 end;
 {$ENDIF}
+
+procedure TPDFiumControlThumbnails.DrawCell(ACol, ARow: Longint; ARect: TRect; AState: TGridDrawState);
+var
+  LRect: TRect;
+begin
+  if not Assigned(PDFiumControl) then
+    Exit;
+
+  RowCount := PDFiumControl.PageCount;
+  Row := PDFiumControl.PageIndex;
+
+  if (RowCount > 0) and not FDefaultSizeSet then
+  begin
+    SetDefaultSize;
+    FDefaultSizeSet := True;
+  end;
+
+  if gdSelected in AState then
+  begin
+{$IFDEF ALPHASKINS}
+    if FSkinData.SkinManager.Active then
+    begin
+      Canvas.Brush.Color := FSkinData.SkinManager.GetHighLightColor;
+      Canvas.Font.Color := FSkinData.SkinManager.GetHighLightFontColor;
+    end
+    else
+    begin
+      Canvas.Brush.Color := TColors.SysHighlight;
+      Canvas.Font.Color := TColors.SysHighlightText;
+    end;
+{$ELSE}
+    Canvas.Brush.Color := TColors.SysHighlight;
+    Canvas.Font.Color := TColors.SysHighlightText;
+{$ENDIF}
+  end
+  else
+  begin
+{$IFDEF ALPHASKINS}
+    if FSkinData.SkinManager.Active then
+    begin
+      Canvas.Brush.Color := FSkinData.SkinManager.GetActiveEditColor;
+      Canvas.Font.Color := FSkinData.SkinManager.GetActiveEditFontColor;
+    end
+    else
+    begin
+      Canvas.Brush.Color := TColors.SysWindow;
+      Canvas.Font.Color := TColors.SysWindowText;
+    end;
+{$ELSE}
+    Canvas.Brush.Color := TColors.SysWindow;
+    Canvas.Font.Color := TColors.SysWindowText;
+{$ENDIF}
+  end;
+
+  Canvas.FillRect(ARect);
+
+  LRect := ARect;
+  InflateRect(LRect, -9, -9);
+  Inc(LRect.Left, 8);
+
+{$IFDEF ALPHASKINS}
+  if IsLightStyleColor(Color) then
+  begin
+{$ENDIF}
+    Canvas.Pen.Color := TColors.Silver;
+    Canvas.Rectangle(LRect);
+
+    InflateRect(LRect, -1, -1);
+{$IFDEF ALPHASKINS}
+  end;
+{$ENDIF}
+
+  PDFiumControl.PaintPage(Canvas.Handle, LRect, ARow);
+
+  Canvas.Pen.Color := TColors.Black;
+  Canvas.Brush.Color := TColors.SysBtnFace;
+  SetBkMode(Canvas.Handle, TRANSPARENT);
+  Canvas.Textout(ARect.Left + 2, ARect.Top, IntToStr(ARow + 1));
+  SetBkMode(Canvas.Handle, OPAQUE);
+end;
+
+{ https://quality.embarcadero.com/browse/RSP-18542 }
+procedure TPDFiumControlThumbnails.MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
+begin
+  FTimerStarted := False;
+
+  FHackedMouseDown := True;
+  try
+    inherited;
+  finally
+    FHackedMouseDown := False;
+  end;
+
+  if FGridState = gsSelecting then
+    KillTimer(Handle, 1);
+end;
+
+procedure TPDFiumControlThumbnails.MouseMove(Shift: TShiftState; X, Y: Integer);
+begin
+  if not FTimerStarted and (FGridState = gsSelecting) then
+  begin
+    SetTimer(Handle, 1, 60, nil);
+    FTimerStarted := True;
+  end;
+
+  inherited;
+end;
+
+procedure TPDFiumControlThumbnails.Resize;
+begin
+  inherited Resize;
+
+  SetDefaultSize;
+end;
+
+procedure TPDFiumControlThumbnails.SetDefaultSize;
+var
+  LPage: TPDFPage;
+  LHeigth: Integer;
+  LWidth: Integer;
+begin
+  if not Assigned(PDFiumControl) then
+    Exit;
+
+  if DefaultColWidth <> ClientWidth then
+    DefaultColWidth := ClientWidth;
+
+  LPage := PDFiumControl.GetPage(0);
+
+  LWidth := DefaultColWidth - 8;
+
+  if Assigned(LPage) then
+  begin
+    LHeigth := Round((LWidth / LPage.Width) * LPage.Height);
+
+    if DefaultRowHeight <> LHeigth then
+      DefaultRowHeight := LHeigth;
+  end;
+end;
+
+procedure TPDFiumControlThumbnails.DoPDFiumControlPageChanged(Sender: TObject);
+begin
+  Invalidate;
+end;
+
+procedure TPDFiumControlThumbnails.SetPDFiumControl(const AValue: TPDFiumControl);
+begin
+  FPDFiumControl := AValue;
+  FPDFiumControl.OnPageChanged := DoPDFiumControlPageChanged;
+end;
+
+function TPDFiumControlThumbnails.SelectCell(ACol, ARow: Longint): Boolean;
+begin
+  Result := inherited;
+
+  if Result and FHackedMousedown then
+  begin
+    FHackedMouseDown := False;
+    try
+      MoveColRow(ACol, ARow, True, False);
+    finally
+      FHackedMouseDown := True;
+    end;
+
+    Result := False;
+  end;
+
+  if Result and Assigned(PDFiumControl) then
+    PDFiumControl.GoToPage(ARow);
+end;
 
 { TPDFDocumentVclPrinter }
 
