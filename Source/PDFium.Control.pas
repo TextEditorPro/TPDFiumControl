@@ -1345,6 +1345,7 @@ var
 begin
   Result := FPageIndex;
 
+  if APoint.Y > 5 then
   for LIndex := 0 to FPageCount - 1 do
   if FPageInfo[LIndex].Rect.Contains(APoint) then
     Exit(LIndex);
@@ -2147,12 +2148,11 @@ begin
     end
     else
     begin
+{$ENDIF}
       Canvas.Brush.Color := TColors.SysHighlight;
       Canvas.Font.Color := TColors.SysHighlightText;
+{$IFDEF ALPHASKINS}
     end;
-{$ELSE}
-    Canvas.Brush.Color := TColors.SysHighlight;
-    Canvas.Font.Color := TColors.SysHighlightText;
 {$ENDIF}
   end
   else
@@ -2165,12 +2165,11 @@ begin
     end
     else
     begin
+{$ENDIF}
       Canvas.Brush.Color := TColors.SysWindow;
       Canvas.Font.Color := TColors.SysWindowText;
+{$IFDEF ALPHASKINS}
     end;
-{$ELSE}
-    Canvas.Brush.Color := TColors.SysWindow;
-    Canvas.Font.Color := TColors.SysWindowText;
 {$ENDIF}
   end;
 
