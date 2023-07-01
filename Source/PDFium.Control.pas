@@ -570,11 +570,11 @@ begin
         FPDFDocument.LoadFromFile(AFilename, LPassword);
       except
         on E: Exception do
-          ShowError(E.Message);
+          raise;
       end;
     end
     else
-      ShowError(E.Message);
+      raise;
   end;
 
   AfterLoad;
@@ -597,11 +597,11 @@ begin
         FPDFDocument.LoadFromStream(AStream, LPassword);
       except
         on E: Exception do
-          ShowError(E.Message);
+          raise;
       end;
     end
     else
-      ShowError(E.Message);
+      raise;
   end;
 
   AfterLoad;
@@ -865,6 +865,7 @@ begin
       if not FSearchText.IsEmpty then
       begin
         LSearchText := FSearchText;
+
         if not FSearchMatchCase then
           LSearchText := LSearchText.ToLower; { Bug in PDFium }
 
@@ -1543,6 +1544,9 @@ var
   LActive: Boolean;
   LRect: TRect;
 begin
+  if not Assigned(CurrentPage) then
+    Exit(False);
+
   LPoint := DeviceToPage(X, Y);
   LCharIndex := CurrentPage.GetCharIndexAt(LPoint.X, LPoint.Y, MAXWORD, MAXWORD);
 
@@ -1647,9 +1651,11 @@ var
   LRects: TPDFControlPDFRectArray;
 begin
   LCount := APage.GetTextRectCount(SelectionStart, SelectionLength);
+
   if LCount > 0 then
   begin
     SetLength(LRects, LCount);
+
     for LIndex := 0 to LCount - 1 do
       LRects[LIndex] := APage.GetTextRect(LIndex);
 
@@ -1661,8 +1667,11 @@ procedure TPDFiumControl.PaintPage(ADC: HDC; const ARect: TRect; const AIndex: I
 var
   LPage: TPDFPage;
 begin
-  LPage := FPDFDocument.Pages[AIndex];
-  LPage.Draw(ADC, ARect.Left, ARect.Top, ARect.Width, ARect.Height, FPageInfo[AIndex].Rotation, []);
+  if FPDFDocument.Active and (AIndex < FPDFDocument.PageCount) then
+  begin
+    LPage := FPDFDocument.Pages[AIndex];
+    LPage.Draw(ADC, ARect.Left, ARect.Top, ARect.Width, ARect.Height, FPageInfo[AIndex].Rotation, []);
+  end;
 end;
 
 procedure TPDFiumControl.PaintPageSearchResults(ADC: HDC; const APage: TPDFPage; const AIndex: Integer);
