@@ -36,6 +36,7 @@ type
 
   TPDFiumControl = class(TScrollingWinControl)
   strict private
+    FAllowFormFieldEdit: Boolean;
     FAllowTextSelection: Boolean;
     FChanged: Boolean;
     FFilename: string;
@@ -99,6 +100,7 @@ type
     procedure DoSizeChanged;
     procedure FormFieldFocus(ADocument: TPDFDocument; AValue: PWideChar; AValueLen: Integer; AFieldFocused: Boolean);
     procedure FormGetCurrentPage(ADocument: TPDFDocument; var APage: TPDFPage);
+    procedure FormInvalidate(ADocument: TPDFDocument; APage: TPDFPage; const APageRect: TPDFRect);
     procedure FormOutputSelectedRect(ADocument: TPDFDocument; APage: TPDFPage; const APageRect: TPDFRect);
     procedure GetPageWebLinks;
     procedure InvalidateRectDiffs(const AOldRects, ANewRects: TPDFControlRectArray);
@@ -120,9 +122,13 @@ type
     procedure ShowError(const AMessage: string);
     procedure UpdatePageIndex;
     procedure WebLinkClick(const AURL: string);
+    procedure WMChar(var AMessage: TWMChar); message WM_CHAR;
     procedure WMEraseBkGnd(var AMessage: TWMEraseBkgnd); message WM_ERASEBKGND;
     procedure WMGetDlgCode(var AMessage: TWMGetDlgCode); message WM_GETDLGCODE;
     procedure WMHScroll(var AMessage: TWMHScroll); message WM_HSCROLL;
+    procedure WMKeyDown(var AMessage: TWMKeyDown); message WM_KEYDOWN;
+    procedure WMKeyUp(var AMessage: TWMKeyUp); message WM_KEYUP;
+    procedure WMKillFocus(var AMessage: TWMKillFocus); message WM_KILLFOCUS;
     procedure WMPaint(var AMessage: TWMPaint); message WM_PAINT;
     procedure WMVScroll(var AMessage: TWMVScroll); message WM_VSCROLL;
   protected
@@ -158,8 +164,10 @@ type
     procedure ClearSearch;
     procedure ClearSelection;
     procedure CloseDocument;
+    procedure CopyFormTextToClipboard;
     procedure CopyToClipboard;
     procedure CreateParams(var AParams: TCreateParams); override;
+    procedure CutFormTextToClipboard;
     procedure GotoNextPage;
     procedure GotoPage(const AIndex: Integer; const ASetScrollBar: Boolean = True);
     procedure GotoPreviousPage;
@@ -169,10 +177,14 @@ type
     procedure LoadFromURL(const AURL: string);
 {$ENDIF}
     procedure PaintPage(ADC: HDC; const ARect: TRect; const AIndex: Integer); overload;
+    procedure PasteFormTextFromClipboard;
     procedure Print;
     procedure RotatePageClockwise;
     procedure RotatePageCounterClockwise;
+    procedure SaveToFile(const AFilename: string; const AOption: TPdfDocumentSaveOption = dsoRemoveSecurity; const AFileVersion: Integer = -1);
+    procedure SaveToStream(const AStream: TStream; const AOption: TPdfDocumentSaveOption = dsoRemoveSecurity; const AFileVersion: Integer = -1);
     procedure SelectAll;
+    procedure SelectAllFormText;
     procedure SelectText(const ACharIndex: Integer; const ACount: Integer);
     procedure SetFocus; override;
 {$IFDEF ALPHASKINS}
@@ -198,6 +210,7 @@ type
 {$ENDIF}
   published
     property Align;
+    property AllowFormFieldEdit: Boolean read FAllowFormFieldEdit write FAllowFormFieldEdit default False;
     property AllowTextSelection: Boolean read FAllowTextSelection write FAllowTextSelection default True;
     property Color;
     property OnLoadProtected: TPDFLoadProtectedEvent read FOnLoadProtected write FOnLoadProtected;
@@ -301,9 +314,11 @@ begin
   FPageIndex := 0;
   FPageMargin := 6;
   FPrintJobTitle := 'Print PDF';
+  FAllowFormFieldEdit := False;
   FAllowTextSelection := True;
 
-  FPDFDocument := CreatePDFDocument;
+  if not (csDesigning in ComponentState) then
+    FPDFDocument := CreatePDFDocument;
 
   DoubleBuffered := True;
   ParentBackground := False;
@@ -322,6 +337,7 @@ end;
 function TPDFiumControl.CreatePDFDocument: TPDFDocument;
 begin
   Result := TPDFDocument.Create;
+  Result.OnFormInvalidate := FormInvalidate;
   Result.OnFormFieldFocus := FormFieldFocus;
   Result.OnFormGetCurrentPage := FormGetCurrentPage;
   Result.OnFormOutputSelectedRect := FormOutputSelectedRect;
@@ -351,7 +367,8 @@ begin
   end;
 {$ENDIF}
 
-  FPDFDocument.Free;
+  if Assigned(FPDFDocument) then
+    FPDFDocument.Free;
 
   inherited;
 end;
@@ -519,6 +536,67 @@ begin
   Invalidate;
 end;
 
+procedure TPDFiumControl.WMKeyDown(var AMessage: TWMKeyDown);
+var
+  LShiftState: TShiftState;
+begin
+  if FAllowFormFieldEdit and IsCurrentPageValid and CurrentPage.FormEventKeyDown(AMessage.CharCode, AMessage.KeyData) then
+  begin
+    case AMessage.CharCode of
+      Ord('C'), Ord('X'), Ord('V'), VK_INSERT, VK_DELETE:
+        begin
+          LShiftState := KeyDataToShiftState(AMessage.KeyData);
+
+          if LShiftState = [ssCtrl] then
+          case AMessage.CharCode of
+            Ord('C'), VK_INSERT:
+              CopyFormTextToClipboard;
+            Ord('X'):
+              CutFormTextToClipboard;
+            Ord('V'):
+              PasteFormTextFromClipboard;
+          end
+          else
+          if LShiftState = [ssShift] then
+          case AMessage.CharCode of
+            VK_INSERT:
+              PasteFormTextFromClipboard;
+            VK_DELETE:
+              CutFormTextToClipboard;
+          end;
+        end;
+    end;
+
+    Exit;
+  end;
+
+  inherited;
+end;
+
+procedure TPDFiumControl.WMKeyUp(var AMessage: TWMKeyUp);
+begin
+  if FAllowFormFieldEdit and IsCurrentPageValid and CurrentPage.FormEventKeyUp(AMessage.CharCode, AMessage.KeyData) then
+    Exit;
+
+  inherited;
+end;
+
+procedure TPDFiumControl.WMChar(var AMessage: TWMChar);
+begin
+  if FAllowFormFieldEdit and IsCurrentPageValid and CurrentPage.FormEventKeyPress(AMessage.CharCode, AMessage.KeyData) then
+    Exit;
+
+  inherited;
+end;
+
+procedure TPDFiumControl.WMKillFocus(var AMessage: TWMKillFocus);
+begin
+  if FAllowFormFieldEdit and IsCurrentPageValid then
+    CurrentPage.FormEventKillFocus;
+
+  inherited;
+end;
+
 procedure TPDFiumControl.UpdatePageIndex;
 var
   LIndex: Integer;
@@ -618,7 +696,7 @@ begin
     LStream := TMemoryStream.Create;
     try
       LHTTPClient.ReadTimeout := 60000;
-      if Pos('https://', AURL) = 1 then
+      if AURL.StartsWith('https://') then
       begin
         LHTTPClient.IOHandler := TIdSSLIOHandlerSocketOpenSSL.Create(LHTTPClient);
         with TIdSSLIOHandlerSocketOpenSSL(LHTTPClient.IOHandler).SSLOptions do
@@ -644,8 +722,11 @@ procedure TPDFiumControl.AfterLoad;
 begin
   ClearSearch;
 
-  SetPageCount(FPDFDocument.PageCount);
-  GetPageWebLinks;
+  if Assigned(FPDFDocument) then
+  begin
+    SetPageCount(FPDFDocument.PageCount);
+    GetPageWebLinks;
+  end;
 
   FChanged := True;
   Invalidate;
@@ -1041,9 +1122,25 @@ begin
   end;
 end;
 
+procedure TPDFiumControl.SaveToFile(const AFilename: string; const AOption: TPdfDocumentSaveOption = dsoRemoveSecurity; const AFileVersion: Integer = -1);
+begin
+  FPDFDocument.SaveToFile(AFilename, AOption, AFileVersion);
+end;
+
+procedure TPDFiumControl.SaveToStream(const AStream: TStream; const AOption: TPdfDocumentSaveOption = dsoRemoveSecurity; const AFileVersion: Integer = -1);
+begin
+  FPDFDocument.SaveToStream(AStream, AOption, AFileVersion);
+end;
+
 procedure TPDFiumControl.SelectAll;
 begin
   SelectText(0, -1);
+end;
+
+procedure TPDFiumControl.SelectAllFormText;
+begin
+  if FFormFieldFocused and IsCurrentPageValid then
+    CurrentPage.FormSelectAllText;
 end;
 
 procedure TPDFiumControl.SelectText(const ACharIndex: Integer; const ACount: Integer);
@@ -1065,6 +1162,42 @@ begin
   SetPageCount(0);
   FFormFieldFocused := False;
   Invalidate;
+end;
+
+procedure TPDFiumControl.CopyFormTextToClipboard;
+var
+  LText: string;
+begin
+  if FFormFieldFocused and IsCurrentPageValid then
+  begin
+    LText := CurrentPage.FormGetSelectedText;
+
+    if not LText.IsEmpty then
+      Clipboard.AsText := LText;
+  end;
+end;
+
+procedure TPDFiumControl.CutFormTextToClipboard;
+begin
+  if FFormFieldFocused and IsCurrentPageValid then
+  begin
+    CopyFormTextToClipboard;
+    CurrentPage.FormReplaceSelection('');
+  end;
+end;
+
+procedure TPDFiumControl.PasteFormTextFromClipboard;
+begin
+  if FFormFieldFocused and IsCurrentPageValid then
+  begin
+    Clipboard.Open;
+    try
+      if Clipboard.HasFormat(CF_UNICODETEXT) or Clipboard.HasFormat(CF_TEXT) then
+        CurrentPage.FormReplaceSelection(Clipboard.AsText);
+    finally
+      Clipboard.Close;
+    end;
+  end;
 end;
 
 procedure TPDFiumControl.CopyToClipboard;
@@ -1311,6 +1444,7 @@ procedure TPDFiumControl.MouseDown(AButton: TMouseButton; AShift: TShiftState; X
 var
   LPoint: TPDFPoint;
   LCharIndex: Integer;
+  LPage: TPdfPage;
 begin
   inherited MouseDown(AButton, AShift, X, Y);
 
@@ -1322,12 +1456,32 @@ begin
     FMouseDownPoint := Point(X, Y); // used to find out if the selection must be cleared or not
   end;
 
-  if IsCurrentPageValid and AllowTextSelection and not FFormFieldFocused then
+  if IsCurrentPageValid then
   begin
-    if AButton = mbLeft then
+    LPage := CurrentPage;
+
+    if FAllowFormFieldEdit then
     begin
       LPoint := DeviceToPage(X, Y);
-      LCharIndex := CurrentPage.GetCharIndexAt(LPoint.X, LPoint.Y, MAXWORD, MAXWORD);
+      if AButton = mbLeft then
+      begin
+        if LPage.FormEventLButtonDown(AShift, LPoint.X, LPoint.Y) then
+          Exit;
+      end
+      else
+      if AButton = mbRight then
+      begin
+        if LPage.FormEventFocus(AShift, LPoint.X, LPoint.Y) then
+          Exit;
+        if LPage.FormEventRButtonDown(AShift, LPoint.X, LPoint.Y) then
+          Exit;
+      end;
+    end;
+
+    if AllowTextSelection and not FFormFieldFocused and (AButton = mbLeft) then
+    begin
+      LPoint := DeviceToPage(X, Y);
+      LCharIndex := LPage.GetCharIndexAt(LPoint.X, LPoint.Y, MAXWORD, MAXWORD);
 
       if ssDouble in AShift then
       begin
@@ -1355,12 +1509,13 @@ end;
 procedure TPDFiumControl.MouseMove(AShift: TShiftState; X, Y: Integer);
 var
   LPoint: TPDFPoint;
+  LPage: TPdfPage;
   LCursor: TCursor;
   LPageIndex: Integer;
 begin
   inherited MouseMove(AShift, X, Y);
 
-  if not FPDFDocument.Active then
+  if not Assigned(FPDFDocument) or not FPDFDocument.Active then
     Exit;
 
   LPageIndex := GetPageIndexAt(Point(X, Y));
@@ -1370,6 +1525,25 @@ begin
 
   LCursor := Cursor;
   try
+    if FAllowFormFieldEdit and IsCurrentPageValid then
+    begin
+      LPoint := DeviceToPage(X, Y);
+      LPage := CurrentPage;
+      if LPage.FormEventMouseMove(AShift, LPoint.X, LPoint.Y) then
+      begin
+        case LPage.HasFormFieldAtPoint(LPoint.X, LPoint.Y) of
+          fftTextField:
+            LCursor := crIBeam;
+          fftComboBox,
+          fftSignature:
+            LCursor := crHandPoint;
+        else
+          LCursor := crDefault;
+        end;
+        Exit;
+      end;
+    end;
+
     if AllowTextSelection and not FFormFieldFocused then
     begin
       if FMousePressed then
@@ -1386,6 +1560,7 @@ begin
       if IsCurrentPageValid then
       begin
         LPoint := DeviceToPage(X, Y);
+
         if IsWebLinkAt(X, Y) then
           LCursor := crHandPoint
         else
@@ -1404,9 +1579,27 @@ end;
 
 procedure TPDFiumControl.MouseUp(AButton: TMouseButton; AShift: TShiftState; X, Y: Integer);
 var
+  LPage: TPdfPage;
+  LPoint: TPDFPoint;
   LURL: string;
 begin
   inherited MouseUp(AButton, AShift, X, Y);
+
+  if FAllowFormFieldEdit and IsCurrentPageValid then
+  begin
+    LPoint := DeviceToPage(X, Y);
+    LPage := CurrentPage;
+    if (AButton = mbLeft) and LPage.FormEventLButtonUp(AShift, LPoint.X, LPoint.Y) then
+    begin
+      if FMousePressed and (AButton = mbLeft) then
+        FMousePressed := False;
+
+      Exit;
+    end;
+
+    if (AButton = mbRight) and LPage.FormEventRButtonUp(AShift, LPoint.X, LPoint.Y) then
+      Exit;
+  end;
 
   if FMousePressed and (AButton = mbLeft) then
   begin
@@ -1586,7 +1779,7 @@ begin
   try
     FillRect(ADC, ClientRect, LBrush);
 
-    if FPageCount = 0 then
+    if not Assigned(FPDFDocument) or (FPageCount = 0) then
       Exit;
 
     if FChanged or (FPageCount = 0) then
@@ -1893,6 +2086,19 @@ begin
   APage := CurrentPage;
 end;
 
+procedure TPDFiumControl.FormInvalidate(ADocument: TPdfDocument; APage: TPdfPage; const APageRect: TPdfRect);
+var
+  LRect: TRect;
+begin
+  FFormOutputSelectedRects := nil;
+
+  if HandleAllocated then
+  begin
+    LRect := InternPageToDevice(APage, APageRect, FPageInfo[FPageIndex].Rect);
+    InvalidateRect(Handle, @LRect, True);
+  end;
+end;
+
 procedure TPDFiumControl.FormFieldFocus(ADocument: TPDFDocument; AValue: PWideChar; AValueLen: Integer; AFieldFocused: Boolean);
 begin
   ClearSelection;
@@ -1942,6 +2148,7 @@ begin
       if AllowTextSelection and (Shift = [ssCtrl]) then
       begin
         SelectAll;
+        SelectAllFormText;
 
         Key := 0;
       end;
@@ -2247,7 +2454,6 @@ procedure TPDFiumControlThumbnails.SetDefaultSize;
 var
   LPage: TPDFPage;
   LHeigth: Integer;
-  LWidth: Integer;
 begin
   if not Assigned(PDFiumControl) then
     Exit;
@@ -2257,11 +2463,9 @@ begin
 
   LPage := PDFiumControl.GetPage(0);
 
-  LWidth := DefaultColWidth - 8;
-
   if Assigned(LPage) then
   begin
-    LHeigth := Round((LWidth / LPage.Width) * LPage.Height);
+    LHeigth := Round(((DefaultColWidth - 8) / LPage.Width) * LPage.Height);
 
     if DefaultRowHeight <> LHeigth then
       DefaultRowHeight := LHeigth;
@@ -2358,7 +2562,7 @@ begin
 end;
 
 class function TPDFDocumentVclPrinter.PrintDocument(const ADocument: TPDFDocument;
-  const AJobTitle: string;  const AShowPrintDialog: Boolean = True; const AllowPageRange: Boolean = True;
+  const AJobTitle: string; const AShowPrintDialog: Boolean = True; const AllowPageRange: Boolean = True;
   const AParentWnd: HWND = 0): Boolean;
 var
   LPDFDocumentVclPrinter: TPDFDocumentVclPrinter;
