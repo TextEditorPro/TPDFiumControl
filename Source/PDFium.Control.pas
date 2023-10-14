@@ -58,6 +58,7 @@
       FLinkRect.Top := LRect.Top;
       FLinkRect.Right := LRect.Right;
       FLinkRect.Bottom := LRect.Bottom;
+
       LLink := FPDFAnnot_GetLink(AHandle);
 
       if Assigned(LLink) then
@@ -1700,8 +1701,6 @@ begin
         else
           LCursor := crDefault;
         end;
-
-        Exit;
       end;
     end;
 
