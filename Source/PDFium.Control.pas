@@ -1,7 +1,7 @@
 ﻿unit PDFium.Control;
 
 {.$DEFINE USE_LOAD_FROM_URL}
-{$DEFINE USE_ANNOTATION_LINKS}
+{.$DEFINE USE_ANNOTATION_LINKS}
 
 { Use of annotation links requires a following fix for PdfiumCore.pas
 
