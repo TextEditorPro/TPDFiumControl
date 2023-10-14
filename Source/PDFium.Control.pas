@@ -28,6 +28,7 @@
 
   constructor TPdfAnnotation.Create(APage: TPdfPage; AHandle: FPDF_ANNOTATION);
   var
+    LSubType: FPDF_ANNOTATION_SUBTYPE;
     LRect: FS_RECTF;
     LLink: FPDF_LINK;
     LAction: FPDF_ACTION;
@@ -40,7 +41,7 @@
     FPage := APage;
     FHandle := AHandle;
 
-    var LSubType := FPDFAnnot_GetSubtype(AHandle);
+    LSubType := FPDFAnnot_GetSubtype(AHandle);
 
     FIsFormField := LSubType in [FPDF_ANNOT_WIDGET, FPDF_ANNOT_XFAWIDGET];
 
