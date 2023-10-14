@@ -1,13 +1,108 @@
 ﻿unit PDFium.Control;
 
 {.$DEFINE USE_LOAD_FROM_URL}
+{$DEFINE USE_ANNOTATION_LINKS}
+
+{ Use of annotation links requires a following fix for PdfiumCore.pas
+
+  TPdfAnnotation = class(TObject)
+  private
+    FFormField: TPdfFormField;
+    FHandle: FPDF_ANNOTATION;
+    FIsFormField: Boolean;
+    FIsLink: Boolean;
+    FLinkRect: TPDFRect;
+    FPage: TPdfPage;
+    FURL: string;
+  protected
+    constructor Create(APage: TPdfPage; AHandle: FPDF_ANNOTATION);
+  public
+    destructor Destroy; override;
+    property FormField: TPdfFormField read FFormField;
+    property Handle: FPDF_ANNOTATION read FHandle;
+    property IsFormField: Boolean read FIsFormField;
+    property IsLink: Boolean read FIsLink;
+    property LinkRect: TPDFRect read FLinkRect;
+    property URL: string read FURL;
+  end;
+
+  constructor TPdfAnnotation.Create(APage: TPdfPage; AHandle: FPDF_ANNOTATION);
+  var
+    LRect: FS_RECTF;
+    LLink: FPDF_LINK;
+    LAction: FPDF_ACTION;
+    LActionType: LongWord;
+    LBufferSize: LongWord;
+    LBuffer: array of AnsiChar;
+  begin
+    inherited Create;
+
+    FPage := APage;
+    FHandle := AHandle;
+
+    var LSubType := FPDFAnnot_GetSubtype(AHandle);
+
+    FIsFormField := LSubType in [FPDF_ANNOT_WIDGET, FPDF_ANNOT_XFAWIDGET];
+
+    if FIsFormField then
+      FFormField := TPdfFormField.Create(Self);
+
+    FIsLink := LSubType = FPDF_ANNOT_LINK;
+
+    if FIsLink then
+    begin
+      FPDFAnnot_GetRect(AHandle, @LRect);
+
+      FLinkRect.Left := LRect.Left;
+      FLinkRect.Top := LRect.Top;
+      FLinkRect.Right := LRect.Right;
+      FLinkRect.Bottom := LRect.Bottom;
+      LLink := FPDFAnnot_GetLink(AHandle);
+
+      if Assigned(LLink) then
+      begin
+        LAction := FPDFLink_GetAction(LLink);
+        LActionType := FPDFAction_GetType(LAction);
+
+        if LActionType = PDFACTION_URI then
+        begin
+          LBufferSize := FPDFAction_GetURIPath(APage.FDocument.FDocument, LAction, nil, 0);
+          SetLength(LBuffer, LBufferSize);
+          FPDFAction_GetURIPath(APage.FDocument.FDocument, LAction, PAnsiChar(LBuffer), LBufferSize);
+          SetString(FURL, PAnsiChar(LBuffer), LBufferSize);
+        end;
+      end;
+    end;
+  end;
+
+  destructor TPdfAnnotation.Destroy;
+  begin
+    if Assigned(FFormField) then
+      FreeAndNil(FFormField);
+
+    if FHandle <> nil then
+    begin
+      FPDFPage_CloseAnnot(FHandle);
+      FHandle := nil;
+    end;
+
+    if FPage.FAnnotations <> nil then
+      FPage.FAnnotations.DestroyingItem(Self);
+
+    inherited Destroy;
+  end; }
 
 interface
 
 uses
   Winapi.Messages, Winapi.Windows, System.Classes, System.Math, System.SysUtils, System.UITypes, System.Variants,
   Vcl.Controls, Vcl.Dialogs, Vcl.ExtCtrls, Vcl.Forms, Vcl.Graphics, Vcl.Grids, PDFiumCore, PDFiumLib
-{$IFDEF ALPHASKINS}, acSBUtils, sCommonData{$ENDIF};
+{$IFDEF ALPHASKINS}
+  , acSBUtils, sCommonData
+{$ENDIF};
+
+const
+  CDefaultDrawOptions = [proAnnotations];
 
 type
   TPDFZoomMode = (zmActualSize, zmFitHeight, zmFitWidth, zmPercent);
@@ -15,6 +110,7 @@ type
   TPDFControlRectArray = array of TRect;
   TPDFControlPDFRectArray = TArray<TPDFRect>;
 
+  TPDFControlClickLinkEvent = procedure(const ASender: TObject; const AURL: string) of object;
   TPDFControlScrollEvent = procedure(const ASender: TObject; const AScrollBar: TScrollBarKind) of object;
   TPDFLoadProtectedEvent = procedure(const ASender: TObject; var APassword: UTF8String) of object;
 
@@ -39,12 +135,14 @@ type
     FAllowFormFieldEdit: Boolean;
     FAllowTextSelection: Boolean;
     FChanged: Boolean;
+    FDrawOptions: TPdfPageRenderOptions;
     FFilename: string;
     FFormFieldFocused: Boolean;
     FFormOutputSelectedRects: TPDFControlPDFRectArray;
     FHeight: Single;
     FMouseDownPoint: TPoint;
     FMousePressed: Boolean;
+    FOnClickLink: TPDFControlClickLinkEvent;
     FOnLoadProtected: TPDFLoadProtectedEvent;
     FOnPageChanged: TNotifyEvent;
     FOnPaint: TNotifyEvent;
@@ -77,6 +175,9 @@ type
     FZoomPercent: Single;
     function CreatePDFDocument: TPDFDocument;
     function DeviceToPage(const X, Y: Integer): TPDFPoint;
+{$IFDEF USE_ANNOTATION_LINKS}
+    function GetAnnotationLinkIndex(const X, Y: Integer; out ARect: TRect): Integer;
+{$ENDIF}
     function GetCurrentPage: TPDFPage;
     function GetPageIndexAt(const APoint: TPoint): Integer;
     function GetSelectionLength: Integer;
@@ -85,6 +186,9 @@ type
     function GetSelectionText: string;
     function GetWebLinkIndex(const X, Y: Integer): Integer;
     function InternPageToDevice(const APage: TPDFPage; const APageRect: TPDFRect; const ARect: TRect): TRect;
+{$IFDEF USE_ANNOTATION_LINKS}
+    function IsAnnotationLinkAt(const X, Y: Integer; var AURL: string; out ALinkRect: TRect): Boolean;
+{$ENDIF}
     function IsCurrentPageValid: Boolean;
     function IsWebLinkAt(const X, Y: Integer): Boolean; overload;
     function IsWebLinkAt(const X, Y: Integer; var AURL: string): Boolean; overload;
@@ -103,6 +207,9 @@ type
     procedure FormInvalidate(ADocument: TPDFDocument; APage: TPDFPage; const APageRect: TPDFRect);
     procedure FormOutputSelectedRect(ADocument: TPDFDocument; APage: TPDFPage; const APageRect: TPDFRect);
     procedure GetPageWebLinks;
+{$IFDEF USE_ANNOTATION_LINKS}
+    procedure HideHint;
+{$ENDIF}
     procedure InvalidateRectDiffs(const AOldRects, ANewRects: TPDFControlRectArray);
     procedure PageChanged;
     procedure PaintAlphaSelection(ADC: HDC; const APage: TPDFPage; const ARects: TPDFControlPDFRectArray; const AIndex: Integer;
@@ -120,8 +227,10 @@ type
     procedure SetZoomMode(const AValue: TPDFZoomMode);
     procedure SetZoomPercent(const AValue: Single);
     procedure ShowError(const AMessage: string);
+{$IFDEF USE_ANNOTATION_LINKS}
+    procedure ShowHint(const AHint: string; const ARect: TRect);
+{$ENDIF}
     procedure UpdatePageIndex;
-    procedure WebLinkClick(const AURL: string);
     procedure WMChar(var AMessage: TWMChar); message WM_CHAR;
     procedure WMEraseBkGnd(var AMessage: TWMEraseBkgnd); message WM_ERASEBKGND;
     procedure WMGetDlgCode(var AMessage: TWMGetDlgCode); message WM_GETDLGCODE;
@@ -213,6 +322,8 @@ type
     property AllowFormFieldEdit: Boolean read FAllowFormFieldEdit write FAllowFormFieldEdit default False;
     property AllowTextSelection: Boolean read FAllowTextSelection write FAllowTextSelection default True;
     property Color;
+    property DrawOptions: TPdfPageRenderOptions read FDrawOptions write FDrawOptions default CDefaultDrawOptions;
+    property OnClickLink: TPDFControlClickLinkEvent read FOnClickLink write FOnClickLink;
     property OnLoadProtected: TPDFLoadProtectedEvent read FOnLoadProtected write FOnLoadProtected;
     property OnPageChanged: TNotifyEvent read FOnPageChanged write FOnPageChanged;
     property OnPaint: TNotifyEvent read FOnPaint write FOnPaint;
@@ -282,10 +393,29 @@ type
 implementation
 
 uses
-  Winapi.ShellAPI, System.Character, System.Generics.Collections, System.Generics.Defaults, System.Types, Vcl.Clipbrd,
-  Vcl.Printers
-{$IFDEF USE_LOAD_FROM_URL}, IdHTTP, IdSSLOpenSSL{$ENDIF}
-{$IFDEF ALPHASKINS}, sConst, sDialogs, sMessages, sStyleSimply, sVCLUtils{$ENDIF};
+  System.Character, System.Generics.Collections, System.Generics.Defaults, System.Types, Vcl.Clipbrd, Vcl.Printers
+{$IFDEF ALPHASKINS}
+  , sConst, sDialogs, sMessages, sStyleSimply, sVCLUtils
+{$ENDIF}
+{$IFDEF USE_LOAD_FROM_URL}
+  , IdHTTP, IdSSLOpenSSL
+{$ENDIF};
+
+{$IFDEF USE_ANNOTATION_LINKS}
+var
+  GHintWindow: THintWindow;
+
+function GetHintWindow: THintWindow;
+begin
+  if not Assigned(GHintWindow) then
+  begin
+    GHintWindow := THintWindow.Create(Application);
+    GHintWindow.DoubleBuffered := True;
+  end;
+
+  Result := GHintWindow;
+end;
+{$ENDIF}
 
 { TPDFPage }
 
@@ -316,6 +446,7 @@ begin
   FPrintJobTitle := 'Print PDF';
   FAllowFormFieldEdit := False;
   FAllowTextSelection := True;
+  FDrawOptions := CDefaultDrawOptions;
 
   if not (csDesigning in ComponentState) then
     FPDFDocument := CreatePDFDocument;
@@ -328,6 +459,7 @@ begin
   TabStop := True;
   Width := 200;
   Height := 250;
+
   VertScrollBar.Smooth := True;
   VertScrollBar.Tracking := True;
   HorzScrollBar.Smooth := True;
@@ -516,10 +648,9 @@ end;
 function TPDFiumControl.DoMouseWheel(AShift: TShiftState; AWheelDelta: Integer; AMousePos: TPoint): Boolean;
 begin
   FChanged := True;
+
   VertScrollBar.Position := VertScrollBar.Position - AWheelDelta;
-
   UpdatePageIndex;
-
   DoScroll(sbVertical);
 
   Result := True;
@@ -532,7 +663,6 @@ begin
   inherited;
 
   DoScroll(sbHorizontal);
-
   Invalidate;
 end;
 
@@ -577,23 +707,18 @@ procedure TPDFiumControl.WMKeyUp(var AMessage: TWMKeyUp);
 begin
   if FAllowFormFieldEdit and IsCurrentPageValid and CurrentPage.FormEventKeyUp(AMessage.CharCode, AMessage.KeyData) then
     Exit;
-
   inherited;
 end;
-
 procedure TPDFiumControl.WMChar(var AMessage: TWMChar);
 begin
   if FAllowFormFieldEdit and IsCurrentPageValid and CurrentPage.FormEventKeyPress(AMessage.CharCode, AMessage.KeyData) then
     Exit;
-
   inherited;
 end;
-
 procedure TPDFiumControl.WMKillFocus(var AMessage: TWMKillFocus);
 begin
   if FAllowFormFieldEdit and IsCurrentPageValid then
     CurrentPage.FormEventKillFocus;
-
   inherited;
 end;
 
@@ -750,6 +875,7 @@ begin
   if FPageCount > 0 then
   begin
     SetLength(FPageInfo, FPageCount);
+
     for LIndex := 0 to FPageCount - 1 do
     begin
       LPage := FPDFDocument.Pages[LIndex];
@@ -778,8 +904,7 @@ procedure TPDFiumControl.SetPageNumber(const AValue: Integer);
 var
   LValue: Integer;
 begin
-  LValue := AValue;
-  Dec(LValue);
+  LValue := AValue - 1;
 
   if IsPageIndexValid(LValue) and (FPageIndex <> LValue) then
   begin
@@ -812,13 +937,39 @@ begin
 end;
 
 procedure TPDFiumControl.SetScrollSize;
+type
+  TScrollInfo = record
+    Position: Int64;
+    Range: Int64;
+  end;
+
+  procedure SetScrollInfo(var AScrollInfo: TScrollInfo; const AScrollBar: TControlScrollBar);
+  begin
+    AScrollInfo.Position := AScrollBar.Position;
+    AScrollInfo.Range := AScrollBar.Range;
+  end;
+
+  procedure SetPosition(const AScrollInfo: TScrollInfo; const AScrollBar: TControlScrollBar);
+  begin
+    if AScrollInfo.Range > 0 then
+      AScrollBar.Position := AScrollBar.Range * AScrollInfo.Position div AScrollInfo.Range;
+  end;
+
 var
   LZoom: Single;
+  LHorzScrollInfo: TScrollInfo;
+  LVertScrollInfo: TScrollInfo;
 begin
+  SetScrollInfo(LHorzScrollInfo, HorzScrollBar);
+  SetScrollInfo(LVertScrollInfo, VertScrollBar);
+
   LZoom := FZoomPercent / 100 * Screen.PixelsPerInch / 72;
 
   HorzScrollBar.Range := Round(FWidth * LZoom) + FPageMargin * 2;
   VertScrollBar.Range := Round(FHeight * LZoom) + FPageMargin * (FPageCount + 1);
+
+  SetPosition(LHorzScrollInfo, HorzScrollBar);
+  SetPosition(LVertScrollInfo, VertScrollBar);
 end;
 
 procedure TPDFiumControl.SetSearchHighlightAll(const AValue: Boolean);
@@ -979,6 +1130,7 @@ begin
             function (const ALeft, ARight: TPDFRect): Integer
             begin
               Result := Trunc(ARight.Top) - Trunc(ALeft.Top);
+
               if Result = 0 then
                 Result := Trunc(ALeft.Left) - Trunc(ARight.Left);
             end)
@@ -1171,7 +1323,6 @@ begin
   if FFormFieldFocused and IsCurrentPageValid then
   begin
     LText := CurrentPage.FormGetSelectedText;
-
     if not LText.IsEmpty then
       Clipboard.AsText := LText;
   end;
@@ -1185,7 +1336,6 @@ begin
     CurrentPage.FormReplaceSelection('');
   end;
 end;
-
 procedure TPDFiumControl.PasteFormTextFromClipboard;
 begin
   if FFormFieldFocused and IsCurrentPageValid then
@@ -1402,6 +1552,7 @@ begin
     ClearSelection;
     LCharCount := LPage.GetCharCount;
     LCharIndex := ACharIndex;
+
     if (LCharIndex >= 0) and (LCharIndex < LCharCount) then
     begin
       while (LCharIndex < LCharCount) and CurrentPage.ReadChar(LCharIndex).IsWhiteSpace do
@@ -1410,9 +1561,11 @@ begin
       if LCharIndex < LCharCount then
       begin
         LStartCharIndex := LCharIndex - 1;
+
         while LStartCharIndex >= 0 do
         begin
           LChar := CurrentPage.ReadChar(LStartCharIndex);
+
           if LChar.IsWhiteSpace then
             Break;
 
@@ -1425,6 +1578,7 @@ begin
         while LStopCharIndex < LCharCount do
         begin
           LChar := CurrentPage.ReadChar(LStopCharIndex);
+
           if LChar.IsWhiteSpace then
             Break;
 
@@ -1512,6 +1666,10 @@ var
   LPage: TPdfPage;
   LCursor: TCursor;
   LPageIndex: Integer;
+{$IFDEF USE_ANNOTATION_LINKS}
+  LURL: string;
+  LRect: TRect;
+{$ENDIF}
 begin
   inherited MouseMove(AShift, X, Y);
 
@@ -1529,6 +1687,7 @@ begin
     begin
       LPoint := DeviceToPage(X, Y);
       LPage := CurrentPage;
+
       if LPage.FormEventMouseMove(AShift, LPoint.X, LPoint.Y) then
       begin
         case LPage.HasFormFieldAtPoint(LPoint.X, LPoint.Y) of
@@ -1540,6 +1699,7 @@ begin
         else
           LCursor := crDefault;
         end;
+
         Exit;
       end;
     end;
@@ -1564,11 +1724,24 @@ begin
         if IsWebLinkAt(X, Y) then
           LCursor := crHandPoint
         else
+{$IFDEF USE_ANNOTATION_LINKS}
+        if IsAnnotationLinkAt(X, Y, LURL, LRect) then
+        begin
+          LCursor := crHandPoint;
+          ShowHint(LURL, LRect);
+        end
+        else
+{$ENDIF}
         if CurrentPage.GetCharIndexAt(LPoint.X, LPoint.Y, 5, 5) >= 0 then
           LCursor := crIBeam
         else
         if Cursor <> crDefault then
+        begin
           LCursor := crDefault;
+{$IFDEF USE_ANNOTATION_LINKS}
+          HideHint;
+{$ENDIF}
+        end;
       end;
     end;
   finally
@@ -1582,6 +1755,9 @@ var
   LPage: TPdfPage;
   LPoint: TPDFPoint;
   LURL: string;
+{$IFDEF USE_ANNOTATION_LINKS}
+  LRect: TRect;
+{$ENDIF}
 begin
   inherited MouseUp(AButton, AShift, X, Y);
 
@@ -1589,6 +1765,7 @@ begin
   begin
     LPoint := DeviceToPage(X, Y);
     LPage := CurrentPage;
+
     if (AButton = mbLeft) and LPage.FormEventLButtonUp(AShift, LPoint.X, LPoint.Y) then
     begin
       if FMousePressed and (AButton = mbLeft) then
@@ -1608,8 +1785,17 @@ begin
     if AllowTextSelection and not FFormFieldFocused then
       SetSelStopCharIndex(X, Y);
 
-    if not FSelectionActive and IsWebLinkAt(X, Y, LURL) then
-      WebLinkClick(LURL);
+    if not FSelectionActive then
+    begin
+      if IsWebLinkAt(X, Y, LURL) then
+        if Assigned(FOnClickLink) then
+          FOnClickLink(Self, LURL);
+{$IFDEF USE_ANNOTATION_LINKS}
+      if IsAnnotationLinkAt(X, Y, LURL, LRect) then
+        if Assigned(FOnClickLink) then
+          FOnClickLink(Self, LURL);
+{$ENDIF}
+    end;
   end;
 end;
 
@@ -1675,19 +1861,87 @@ begin
   Result := GetWebLinkIndex(X, Y) <> -1;
 end;
 
-{ Note! There is an issue with multiline URLs in PDF - PDFium.dll returns the url using a hyphen as a separator.
+{ Note! There is an issue with multiline URLs in PDF - PDFium.dll returns the url using a hyphen as a word wrap separator.
   The hyphen is a valid character in the url, so it can't just be removed. }
 function TPDFiumControl.IsWebLinkAt(const X, Y: Integer; var AURL: string): Boolean;
 var
   LIndex: Integer;
 begin
   LIndex := GetWebLinkIndex(X, Y);
+
   Result := LIndex <> -1;
+
   if Result then
     AURL := CurrentPage.GetWebLinkURL(LIndex)
   else
     AURL := '';
 end;
+
+{$IFDEF USE_ANNOTATION_LINKS}
+function TPDFiumControl.GetAnnotationLinkIndex(const X, Y: Integer; out ARect: TRect): Integer;
+var
+  LPoint: TPoint;
+  LPage: TPDFPage;
+  LAnnotation: TPdfAnnotation;
+begin
+  Result := -1;
+
+  if not (proAnnotations in FDrawOptions) then
+    Exit;
+
+  LPoint := Point(X, Y);
+  LPage := CurrentPage;
+
+  for Result := 0 to LPage.Annotations.Count - 1 do
+  begin
+    LAnnotation := LPage.Annotations[Result];
+
+    if LAnnotation.IsLink then
+    begin
+      ARect := InternPageToDevice(LPage, LAnnotation.LinkRect, FPageInfo[FPageIndex].Rect);
+
+      if PtInRect(ARect, LPoint) then
+        Exit;
+    end;
+  end;
+
+  Result := -1;
+end;
+
+function TPDFiumControl.IsAnnotationLinkAt(const X, Y: Integer; var AURL: string; out ALinkRect: TRect): Boolean;
+var
+  LIndex: Integer;
+begin
+  LIndex := GetAnnotationLinkIndex(X, Y, ALinkRect);
+
+  Result := LIndex <> -1;
+
+  if Result then
+    AURL := CurrentPage.Annotations[LIndex].URL
+  else
+    AURL := '';
+end;
+
+procedure TPDFiumControl.ShowHint(const AHint: string; const ARect: TRect);
+var
+  LHintWindow: THintWindow;
+  LRect: TRect;
+  LPoint: TPoint;
+begin
+  LHintWindow := GetHintWindow;
+  LRect := LHintWindow.CalcHintRect(200, AHint, nil);
+  LPoint := ClientToScreen(Point(ARect.Left, ARect.Bottom));
+  OffsetRect(LRect, LPoint.X, LPoint.Y);
+  LHintWindow.ActivateHint(LRect, AHint);
+  LHintWindow.Update;
+end;
+
+procedure TPDFiumControl.HideHint;
+begin
+  if Assigned(GHintWindow) then
+    ShowWindow(GHintWindow.Handle, SW_HIDE);
+end;
+{$ENDIF}
 
 procedure TPDFiumControl.GotoNextPage;
 begin
@@ -1714,8 +1968,10 @@ begin
   LScale := 72 / Screen.PixelsPerInch;
   LZoom1 := (ClientWidth - 2 * FPageMargin) * LScale / FPageInfo[FPageIndex].Width;
   LZoom2 := (ClientHeight - 2 * FPageMargin) * LScale / FPageInfo[FPageIndex].Height;
+
   if LZoom1 > LZoom2 then
     LZoom1 := LZoom2;
+
   Result := 100 * LZoom1;
 end;
 
@@ -1727,7 +1983,7 @@ begin
     Exit(100);
 
   LScale := 72 / Screen.PixelsPerInch;
-  Result := 100 * (ClientWidth - 2 * FPageMargin) * LScale / FPageInfo[FPageIndex].Width;
+  Result := 100 * (ClientWidth - 2 * FPageMargin) * LScale / Max(FWidth, 1);
 end;
 
 function TPDFiumControl.SetSelStopCharIndex(const X, Y: Integer): Boolean;
@@ -1830,7 +2086,7 @@ begin
   begin
     LRect := TRect.Create(0, 0, Rect.Width, Rect.Height);
     SetViewportOrgEx(ADC, Rect.Left, Rect.Top, @LPoint);
-    APage.Draw(ADC, LRect.Left, LRect.Top, LRect.Width, LRect.Height, Rotation, []);
+    APage.Draw(ADC, LRect.Left, LRect.Top, LRect.Width, LRect.Height, Rotation, FDrawOptions);
     SetViewportOrgEx(ADC, LPoint.X, LPoint.Y, nil);
   end
   else
@@ -1863,7 +2119,7 @@ begin
   if FPDFDocument.Active and (AIndex < FPDFDocument.PageCount) then
   begin
     LPage := FPDFDocument.Pages[AIndex];
-    LPage.Draw(ADC, ARect.Left, ARect.Top, ARect.Width, ARect.Height, FPageInfo[AIndex].Rotation, []);
+    LPage.Draw(ADC, ARect.Left, ARect.Top, ARect.Width, ARect.Height, FPageInfo[AIndex].Rotation, FDrawOptions);
   end;
 end;
 
@@ -1916,6 +2172,7 @@ var
   end;
 begin
   LCount := Length(ARects);
+
   if LCount > 0 then
   begin
     LBitmap := TBitmap.Create;
@@ -2112,16 +2369,6 @@ begin
 {$ELSE}
   MessageDlg(AMessage, mtError, [mbOK], 0);
 {$ENDIF}
-end;
-
-procedure TPDFiumControl.WebLinkClick(const AURL: string);
-var
-  LResult: Boolean;
-begin
-  LResult := ShellExecute(0, 'open', PChar(AURL), nil, nil, SW_NORMAL) > 32;
-
-  if not LResult then
-    ShowError(SysErrorMessage(GetLastError));
 end;
 
 procedure TPDFiumControl.KeyDown(var Key: Word; Shift: TShiftState);
