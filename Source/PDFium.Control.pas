@@ -1695,19 +1695,18 @@ begin
       SetSelStopCharIndex(X, Y);
 
     if not FSelectionActive then
-    begin
-{$IFDEF USE_ANNOTATION_LINKS}
       if Assigned(FOnClickLink) then
+      begin
+{$IFDEF USE_ANNOTATION_LINKS}
         if IsAnnotationLinkAt(X, Y, LURL, LRect) then
         begin
           FOnClickLink(Self, LURL);
           Exit;
         end;
 {$ENDIF}
-      if Assigned(FOnClickLink) then
         if IsWebLinkAt(X, Y, LURL) then
           FOnClickLink(Self, LURL);
-    end;
+      end;
   end;
 end;
 
