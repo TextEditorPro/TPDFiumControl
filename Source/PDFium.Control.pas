@@ -1768,7 +1768,7 @@ begin
   if Assigned(LPage) then
   begin
     LPoint := DeviceToPage(X, Y);
-    LAnnotation := CurrentPage.GetLinkAtPoint(LPoint.X, LPoint.Y);
+    LAnnotation := LPage.GetLinkAtPoint(LPoint.X, LPoint.Y);
 
     if Assigned(LAnnotation) then
     begin
