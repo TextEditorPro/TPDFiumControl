@@ -104,6 +104,7 @@ type
     procedure AdjustScrollBar(const APageIndex: Integer);
     procedure AdjustZoom;
     procedure AfterLoad;
+    procedure CMGesture(var AMessage: TCMGesture); message CM_GESTURE;
     procedure DoScroll(const AScrollBarKind: TScrollBarKind);
     procedure DoSizeChanged;
     procedure FormFieldFocus(ADocument: TPDFDocument; AValue: PWideChar; AValueLen: Integer; AFieldFocused: Boolean);
@@ -266,8 +267,8 @@ type
     property PDFiumControl: TPDFiumControl read FPDFiumControl write SetPDFiumControl;
   public
     constructor Create(AOwner: TComponent); override;
-    destructor Destroy; override;
 {$IFDEF ALPHASKINS}
+    destructor Destroy; override;
     procedure AfterConstruction; override;
     procedure WndProc(var AMessage: TMessage); override;
     property SkinData: TsScrollWndData read FSkinData write FSkinData;
@@ -765,6 +766,15 @@ begin
     SetPageCount(FPDFDocument.PageCount);
     GetPageWebLinks;
   end;
+
+  FChanged := True;
+
+  Invalidate;
+end;
+
+procedure TPDFiumControl.CMGesture(var AMessage: TCMGesture);
+begin
+  inherited;
 
   FChanged := True;
   Invalidate;
@@ -2312,9 +2322,9 @@ begin
   Width := 180;
 end;
 
+{$IFDEF ALPHASKINS}
 destructor TPDFiumControlThumbnails.Destroy;
 begin
-{$IFDEF ALPHASKINS}
   if Assigned(FScrollWnd) then
   begin
     FScrollWnd.Free;
@@ -2326,12 +2336,10 @@ begin
     FSkinData.Free;
     FSkinData := nil;
   end;
-{$ENDIF}
 
   inherited;
 end;
 
-{$IFDEF ALPHASKINS}
 procedure TPDFiumControlThumbnails.AfterConstruction;
 begin
   inherited AfterConstruction;
