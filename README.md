@@ -26,4 +26,4 @@ https://www.linkedin.com/in/lassemarkusrautiainen/
 
 ## Donations
 
-https://www.texteditor.pro/support/donations/
+https://ko-fi.com/texteditorpro
