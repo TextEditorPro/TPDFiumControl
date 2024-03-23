@@ -295,11 +295,11 @@ implementation
 
 uses
   System.Character, System.Generics.Collections, System.Generics.Defaults, System.Types, Vcl.Clipbrd, Vcl.Printers
+{$IFDEF USE_LOAD_FROM_URL}
+  , System.Net.HttpClientComponent, System.Net.HttpClient
+{$ENDIF}
 {$IFDEF ALPHASKINS}
   , sConst, sDialogs, sMessages, sStyleSimply, sVCLUtils
-{$ENDIF}
-{$IFDEF USE_LOAD_FROM_URL}
-  , IdHTTP, IdSSLOpenSSL
 {$ENDIF};
 
 var
@@ -723,28 +723,31 @@ begin
 end;
 
 {$IFDEF USE_LOAD_FROM_URL}
+function CreateNetHTTPClient: TNetHTTPClient;
+const
+  DefaultTimeout = 60000;
+begin
+  Result := TNetHTTPClient.Create(nil);
+
+  with Result do
+  begin
+    HandleRedirects := True;
+    SecureProtocols := [THTTPSecureProtocol.TLS11, THTTPSecureProtocol.TLS12, THTTPSecureProtocol.TLS13];
+    ConnectionTimeout := DefaultTimeout;
+    ResponseTimeout := DefaultTimeout;
+    SendTimeout := DefaultTimeout;
+  end;
+end;
+
 procedure TPDFiumControl.LoadFromURL(const AURL: string);
 var
   LStream: TMemoryStream;
-  LHTTPClient: TIdHTTP;
+  LHTTPClient: TNetHTTPClient;
 begin
-  LHTTPClient := TIdHTTP.Create;
+  LHTTPClient := CreateNetHTTPClient;
   try
     LStream := TMemoryStream.Create;
     try
-      LHTTPClient.ReadTimeout := 60000;
-
-      if AURL.StartsWith('https://') then
-      begin
-        LHTTPClient.IOHandler := TIdSSLIOHandlerSocketOpenSSL.Create(LHTTPClient);
-        with TIdSSLIOHandlerSocketOpenSSL(LHTTPClient.IOHandler).SSLOptions do
-        begin
-          Method := sslvTLSv1_2;
-          SSLVersions := SSLVersions + [sslvTLSv1_2];
-        end;
-        LHTTPClient.Request.BasicAuthentication := True;
-      end;
-
       LHTTPClient.Get(AURL, LStream);
       LStream.Position := 0;
       LoadFromStream(LStream);
