@@ -92,7 +92,7 @@ type
     function GetSelectionStart: Integer;
     function GetSelectionText: string;
     function InternPageToDevice(const APage: TPDFPage; const APageRect: TPDFRect; const ARect: TRect): TRect;
-    function IsAnnotationLinkAt(const X, Y: Integer; var AURL: string; out ALinkRect: TRect): Boolean;
+    function IsAnnotationLinkAt(const X, Y: Integer; out AURL: string; out APageIndex: Integer; out ALinkRect: TRect): Boolean;
     function IsCurrentPageValid: Boolean;
     function IsWebLinkAt(const X, Y: Integer): Boolean; overload;
     function IsWebLinkAt(const X, Y: Integer; var AURL: string): Boolean; overload;
@@ -179,7 +179,7 @@ type
     procedure CreateParams(var AParams: TCreateParams); override;
     procedure CutFormTextToClipboard;
     procedure GotoNextPage;
-    procedure GotoPage(const AIndex: Integer; const ASetScrollBar: Boolean = True);
+    procedure GoToPage(const AIndex: Integer; const ASetScrollBar: Boolean = True);
     procedure GotoPreviousPage;
     procedure LoadFromFile(const AFilename: string);
     procedure LoadFromStream(const AStream: TStream);
@@ -1072,7 +1072,7 @@ begin
 
       if AScrollIntoView then
       begin
-        GotoPage(LPageIndex, False);
+        GoToPage(LPageIndex, False);
         AdjustScrollBar(LPageIndex);
       end;
 
@@ -1131,7 +1131,7 @@ begin
     end;
   end;
 
-  GotoPage(LPageIndex, False);
+  GoToPage(LPageIndex, False);
   AdjustScrollBar(LPageIndex);
 
   Result := FSearchIndex;
@@ -1177,7 +1177,7 @@ begin
     end;
   end;
 
-  GotoPage(LPageIndex, False);
+  GoToPage(LPageIndex, False);
   AdjustScrollBar(LPageIndex);
 
   Result := FSearchIndex;
@@ -1310,7 +1310,7 @@ begin
   Inc(Result, PageToScreen(LY));
 end;
 
-procedure TPDFiumControl.GotoPage(const AIndex: Integer; const ASetScrollBar: Boolean = True);
+procedure TPDFiumControl.GoToPage(const AIndex: Integer; const ASetScrollBar: Boolean = True);
 begin
   if FPageIndex = AIndex then
     Exit;
@@ -1645,10 +1645,12 @@ begin
         if Assigned(FOnClickLink) and IsWebLinkAt(X, Y) then
           LCursor := crHandPoint
         else
-        if Assigned(FOnClickLink) and IsAnnotationLinkAt(X, Y, LURL, LRect) then
+        if Assigned(FOnClickLink) and IsAnnotationLinkAt(X, Y, LURL, LPageIndex, LRect) then
         begin
           LCursor := crHandPoint;
-          ShowHint(LURL, LRect);
+
+          if not LURL.IsEmpty then
+            ShowHint(LURL, LRect);
         end
         else
         if CurrentPage.GetCharIndexAt(LPoint.X, LPoint.Y, 5, 5) >= 0 then
@@ -1673,6 +1675,7 @@ var
   LPoint: TPDFPoint;
   LURL: string;
   LRect: TRect;
+  LPageIndex: Integer;
 begin
   inherited MouseUp(AButton, AShift, X, Y);
 
@@ -1703,8 +1706,13 @@ begin
     if not FSelectionActive then
       if Assigned(FOnClickLink) then
       begin
-        if IsAnnotationLinkAt(X, Y, LURL, LRect) then
-          FOnClickLink(Self, LURL)
+        if IsAnnotationLinkAt(X, Y, LURL, LPageIndex, LRect) then
+        begin
+          if LPageIndex = -1 then
+            FOnClickLink(Self, LURL)
+          else
+            GoToPage(LPageIndex);
+        end
         else
         if IsWebLinkAt(X, Y, LURL) then
           FOnClickLink(Self, LURL);
@@ -1768,15 +1776,20 @@ begin
     Result := False;
 end;
 
-function TPDFiumControl.IsAnnotationLinkAt(const X, Y: Integer; var AURL: string; out ALinkRect: TRect): Boolean;
+function TPDFiumControl.IsAnnotationLinkAt(const X, Y: Integer; out AURL: string; out APageIndex: Integer; out ALinkRect: TRect): Boolean;
 var
   LPage: TPDFPage;
   LPoint: TPdfPoint;
   LAnnotation: TPdfAnnotation;
+  LLinkGotoDestination: TPdfLinkGotoDestination;
 begin
+  Result := False;
+
   LPage := CurrentPage;
 
-  Result := False;
+  APageIndex := -1;
+  AURL := '';
+  ALinkRect := TRect.Empty;
 
   if Assigned(LPage) then
   begin
@@ -1785,7 +1798,18 @@ begin
 
     if Assigned(LAnnotation) then
     begin
-      AURL := LAnnotation.LinkUri;
+      if LAnnotation.LinkType = altGoto then
+      begin
+         if LAnnotation.GetLinkGotoDestination(LLinkGotoDestination) then
+         try
+           APageIndex := LLinkGotoDestination.PageIndex;
+         finally
+           LLinkGotoDestination.Free;
+         end;
+      end
+      else
+        AURL := LAnnotation.LinkUri;
+
       ALinkRect := InternPageToDevice(LPage, LAnnotation.AnnotationRect, FPageInfo[FPageIndex].Rect);
     end
     else
@@ -1819,7 +1843,7 @@ end;
 
 procedure TPDFiumControl.GotoNextPage;
 begin
-  GotoPage(FPageIndex + 1);
+  GoToPage(FPageIndex + 1);
 end;
 
 procedure TPDFiumControl.WMPaint(var AMessage: TWMPaint);
@@ -2094,7 +2118,7 @@ end;
 
 procedure TPDFiumControl.GotoPreviousPage;
 begin
-  GotoPage(FPageIndex - 1);
+  GoToPage(FPageIndex - 1);
 end;
 
 procedure TPDFiumControl.Print;
@@ -2283,9 +2307,9 @@ begin
     VK_NEXT:
       GotoNextPage;
     VK_HOME:
-      GotoPage(0);
+      GoToPage(0);
     VK_END:
-      GotoPage(PageCount - 1);
+      GoToPage(PageCount - 1);
   end;
 
   case Key of
