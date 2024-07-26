@@ -2482,11 +2482,10 @@ procedure TPDFiumControlThumbnails.DrawCell(ACol, ARow: Longint; ARect: TRect; A
 var
   LRect: TRect;
 begin
-  if not Assigned(PDFiumControl) then
+  if not Assigned(PDFiumControl) or (gdSelected in AState) and (ARow <> PDFiumControl.PageIndex) then
     Exit;
 
   RowCount := PDFiumControl.PageCount;
-  Row := PDFiumControl.PageIndex;
 
   if (RowCount > 0) and not FDefaultSizeSet then
   begin
@@ -2614,7 +2613,11 @@ end;
 
 procedure TPDFiumControlThumbnails.DoPDFiumControlPageChanged(Sender: TObject);
 begin
-  Invalidate;
+  if Visible then
+  begin
+    Row := PDFiumControl.PageIndex;
+    Invalidate;
+  end;
 end;
 
 procedure TPDFiumControlThumbnails.SetPDFiumControl(const AValue: TPDFiumControl);
