@@ -576,31 +576,34 @@ procedure TPDFiumControl.WMKeyDown(var AMessage: TWMKeyDown);
 var
   LShiftState: TShiftState;
 begin
-  if FAllowFormFieldEdit and IsCurrentPageValid and CurrentPage.FormEventKeyDown(AMessage.CharCode, AMessage.KeyData) then
+  if FAllowFormFieldEdit and IsCurrentPageValid then
   begin
-    case AMessage.CharCode of
-      Ord('C'), Ord('X'), Ord('V'), VK_INSERT, VK_DELETE:
-        begin
-          LShiftState := KeyDataToShiftState(AMessage.KeyData);
+    LShiftState := KeyDataToShiftState(AMessage.KeyData);
 
-          if LShiftState = [ssCtrl] then
-          case AMessage.CharCode of
-            Ord('C'), VK_INSERT:
-              CopyFormTextToClipboard;
-            Ord('X'):
-              CutFormTextToClipboard;
-            Ord('V'):
-              PasteFormTextFromClipboard;
-          end
-          else
-          if LShiftState = [ssShift] then
-          case AMessage.CharCode of
-            VK_INSERT:
-              PasteFormTextFromClipboard;
-            VK_DELETE:
-              CutFormTextToClipboard;
+    if CurrentPage.FormEventKeyDown(AMessage.CharCode, LShiftState) then
+    begin
+      case AMessage.CharCode of
+        Ord('C'), Ord('X'), Ord('V'), VK_INSERT, VK_DELETE:
+          begin
+            if LShiftState = [ssCtrl] then
+            case AMessage.CharCode of
+              Ord('C'), VK_INSERT:
+                CopyFormTextToClipboard;
+              Ord('X'):
+                CutFormTextToClipboard;
+              Ord('V'):
+                PasteFormTextFromClipboard;
+            end
+            else
+            if LShiftState = [ssShift] then
+            case AMessage.CharCode of
+              VK_INSERT:
+                PasteFormTextFromClipboard;
+              VK_DELETE:
+                CutFormTextToClipboard;
+            end;
           end;
-        end;
+      end;
     end;
 
     Exit;
@@ -611,7 +614,8 @@ end;
 
 procedure TPDFiumControl.WMKeyUp(var AMessage: TWMKeyUp);
 begin
-  if FAllowFormFieldEdit and IsCurrentPageValid and CurrentPage.FormEventKeyUp(AMessage.CharCode, AMessage.KeyData) then
+  if FAllowFormFieldEdit and IsCurrentPageValid and CurrentPage.FormEventKeyUp(AMessage.CharCode,
+    KeyDataToShiftState(AMessage.KeyData)) then
     Exit;
 
   inherited;
@@ -619,7 +623,8 @@ end;
 
 procedure TPDFiumControl.WMChar(var AMessage: TWMChar);
 begin
-  if FAllowFormFieldEdit and IsCurrentPageValid and CurrentPage.FormEventKeyPress(AMessage.CharCode, AMessage.KeyData) then
+  if FAllowFormFieldEdit and IsCurrentPageValid and CurrentPage.FormEventKeyPress(AMessage.CharCode,
+    KeyDataToShiftState(AMessage.KeyData)) then
     Exit;
 
   inherited;
@@ -2482,11 +2487,10 @@ procedure TPDFiumControlThumbnails.DrawCell(ACol, ARow: Longint; ARect: TRect; A
 var
   LRect: TRect;
 begin
-  if not Assigned(PDFiumControl) then
+  if not Assigned(PDFiumControl) or (gdSelected in AState) and (ARow <> PDFiumControl.PageIndex) then
     Exit;
 
   RowCount := PDFiumControl.PageCount;
-  Row := PDFiumControl.PageIndex;
 
   if (RowCount > 0) and not FDefaultSizeSet then
   begin
@@ -2614,7 +2618,11 @@ end;
 
 procedure TPDFiumControlThumbnails.DoPDFiumControlPageChanged(Sender: TObject);
 begin
-  Invalidate;
+  if Visible then
+  begin
+    Row := PDFiumControl.PageIndex;
+    Invalidate;
+  end;
 end;
 
 procedure TPDFiumControlThumbnails.SetPDFiumControl(const AValue: TPDFiumControl);
