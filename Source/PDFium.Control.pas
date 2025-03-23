@@ -40,7 +40,7 @@ type
     function Page: FPDF_PAGE;
   end;
 
-  TPDFiumControl = class(TScrollingWinControl)
+  TCustomPDFiumControl = class(TScrollingWinControl)
   strict private
     FAllowFormFieldEdit: Boolean;
     FAllowTextSelection: Boolean;
@@ -52,6 +52,7 @@ type
     FHeight: Single;
     FMouseDownPoint: TPoint;
     FMousePressed: Boolean;
+    FOnAfterLoad: TNotifyEvent;
     FOnClickLink: TPDFControlClickLinkEvent;
     FOnLoadProtected: TPDFLoadProtectedEvent;
     FOnPageChanged: TNotifyEvent;
@@ -103,7 +104,6 @@ type
     procedure AdjustPageInfo;
     procedure AdjustScrollBar(const APageIndex: Integer);
     procedure AdjustZoom;
-    procedure AfterLoad;
     procedure CMGesture(var AMessage: TCMGesture); message CM_GESTURE;
     procedure DoScroll(const AScrollBarKind: TScrollBarKind);
     procedure DoSizeChanged;
@@ -113,6 +113,7 @@ type
     procedure FormOutputSelectedRect(ADocument: TPDFDocument; APage: TPDFPage; const APageRect: TPDFRect);
     procedure GetPageWebLinks;
     procedure HideHint;
+    procedure InternalAfterLoad;
     procedure InvalidateRectDiffs(const AOldRects, ANewRects: TPDFControlRectArray);
     procedure PageChanged;
     procedure PaintAlphaSelection(ADC: HDC; const APage: TPDFPage; const ARects: TPDFControlPDFRectArray; const AIndex: Integer;
@@ -203,45 +204,70 @@ type
     procedure ZoomToHeight;
     procedure ZoomToWidth;
     procedure Zoom(const APercent: Single);
-    property CurrentPage: TPDFPage read GetCurrentPage;
-    property Filename: string read FFilename write FFilename;
-    property PDFDocument: TPDFDocument read FPDFDocument;
-    property PageCount: Integer read FPageCount;
-    property PageIndex: Integer read FPageIndex write SetPageIndex;
-    property PageNumber: Integer read GetPageNumber write SetPageNumber;
-    property SearchCount: Integer read FSearchCount write FSearchCount;
-    property SearchIndex: Integer read FSearchIndex write FSearchIndex;
-    property SearchText: string read FSearchText write FSearchText;
-    property SelectionLength: Integer read GetSelectionLength;
-    property SelectionStart: Integer read GetSelectionStart;
-    property SelectionText: string read GetSelectionText;
-{$IFDEF ALPHASKINS}
-    property SkinData: TsScrollWndData read FSkinData write FSkinData;
-{$ENDIF}
-  published
     property Align;
     property AllowFormFieldEdit: Boolean read FAllowFormFieldEdit write FAllowFormFieldEdit default False;
     property AllowTextSelection: Boolean read FAllowTextSelection write FAllowTextSelection default True;
     property Color;
+    property CurrentPage: TPDFPage read GetCurrentPage;
     property DrawOptions: TPdfPageRenderOptions read FDrawOptions write FDrawOptions default CDefaultDrawOptions;
+    property Filename: string read FFilename write FFilename;
+    property OnAfterLoad: TNotifyEvent read FOnAfterLoad write FOnAfterLoad;
     property OnClickLink: TPDFControlClickLinkEvent read FOnClickLink write FOnClickLink;
     property OnLoadProtected: TPDFLoadProtectedEvent read FOnLoadProtected write FOnLoadProtected;
     property OnPageChanged: TNotifyEvent read FOnPageChanged write FOnPageChanged;
     property OnPaint: TNotifyEvent read FOnPaint write FOnPaint;
     property OnScroll: TPDFControlScrollEvent read FOnScroll write FOnScroll;
+    property PDFDocument: TPDFDocument read FPDFDocument;
     property PageBorderColor: TColor read FPageBorderColor write FPageBorderColor default TColors.Silver;
+    property PageCount: Integer read FPageCount;
+    property PageIndex: Integer read FPageIndex write SetPageIndex;
     property PageMargin: Integer read FPageMargin write FPageMargin default 6;
+    property PageNumber: Integer read GetPageNumber write SetPageNumber;
     property PopupMenu;
     property PrintJobTitle: string read FPrintJobTitle write FPrintJobTitle;
+    property SearchCount: Integer read FSearchCount write FSearchCount;
     property SearchHighlightAll: Boolean read FSearchHighlightAll write SetSearchHighlightAll;
+    property SearchIndex: Integer read FSearchIndex write FSearchIndex;
     property SearchMatchCase: Boolean read FSearchMatchCase write FSearchMatchCase;
+    property SearchText: string read FSearchText write FSearchText;
     property SearchWholeWords: Boolean read FSearchWholeWords write FSearchWholeWords;
+    property SelectionLength: Integer read GetSelectionLength;
+    property SelectionStart: Integer read GetSelectionStart;
+    property SelectionText: string read GetSelectionText;
+{$IFDEF ALPHASKINS}
+    property SkinData: TsScrollWndData read FSkinData write FSkinData;
+ {$ENDIF}
     property Visible;
     property ZoomMode: TPDFZoomMode read FZoomMode write SetZoomMode default zmActualSize;
     property ZoomPercent: Single read FZoomPercent write SetZoomPercent;
   end;
 
-  TPDFiumControlThumbnails = class(TDrawGrid)
+  TPDFiumControl = class(TCustomPDFiumControl)
+  published
+    property Align;
+    property AllowFormFieldEdit;
+    property AllowTextSelection;
+    property Color;
+    property DrawOptions;
+    property OnAfterLoad;
+    property OnClickLink;
+    property OnLoadProtected;
+    property OnPageChanged;
+    property OnPaint;
+    property OnScroll;
+    property PageBorderColor;
+    property PageMargin;
+    property PopupMenu;
+    property PrintJobTitle;
+    property SearchHighlightAll;
+    property SearchMatchCase;
+    property SearchWholeWords;
+    property Visible;
+    property ZoomMode;
+    property ZoomPercent;
+  end;
+
+  TCustomPDFiumControlThumbnails = class(TDrawGrid)
   private
     FDefaultSizeSet: Boolean;
     FIsMousedown: Boolean;
@@ -251,6 +277,7 @@ type
     FSkinData: TsScrollWndData;
 {$ENDIF}
     FTimerStarted: Boolean;
+    procedure DoPDFiumControlAfterLoad(Sender: TObject);
     procedure DoPDFiumControlPageChanged(Sender: TObject);
     procedure SetDefaultSize;
     procedure SetPDFiumControl(const AValue: TPDFiumControl);
@@ -263,7 +290,6 @@ type
     procedure MouseDown(Button: TMouseButton; Shift: TShiftState; X: Integer; Y: Integer); override;
     procedure MouseMove(Shift: TShiftState; X: Integer; Y: Integer); override;
     procedure Resize; override;
-  published
     property PDFiumControl: TPDFiumControl read FPDFiumControl write SetPDFiumControl;
   public
     constructor Create(AOwner: TComponent); override;
@@ -273,6 +299,11 @@ type
     procedure WndProc(var AMessage: TMessage); override;
     property SkinData: TsScrollWndData read FSkinData write FSkinData;
 {$ENDIF}
+  end;
+
+  TPDFiumControlThumbnails = class(TCustomPDFiumControlThumbnails)
+  published
+    property PDFiumControl;
   end;
 
   TPDFDocumentVclPrinter = class(TPDFDocumentPrinter)
@@ -324,9 +355,9 @@ begin
   Result := FPage;
 end;
 
-{ TPDFiumControl }
+{ TCustomPDFiumControl }
 
-constructor TPDFiumControl.Create(AOwner: TComponent);
+constructor TCustomPDFiumControl.Create(AOwner: TComponent);
 begin
 {$IFDEF ALPHASKINS}
   FSkinData := TsScrollWndData.Create(Self, True);
@@ -365,7 +396,7 @@ begin
   HorzScrollBar.Tracking := True;
 end;
 
-function TPDFiumControl.CreatePDFDocument: TPDFDocument;
+function TCustomPDFiumControl.CreatePDFDocument: TPDFDocument;
 begin
   Result := TPDFDocument.Create;
   Result.OnFormInvalidate := FormInvalidate;
@@ -374,7 +405,7 @@ begin
   Result.OnFormOutputSelectedRect := FormOutputSelectedRect;
 end;
 
-procedure TPDFiumControl.CreateParams(var AParams: TCreateParams);
+procedure TCustomPDFiumControl.CreateParams(var AParams: TCreateParams);
 begin
   inherited CreateParams(AParams);
 
@@ -382,7 +413,7 @@ begin
   Style := Style and not (CS_HREDRAW or CS_VREDRAW);
 end;
 
-destructor TPDFiumControl.Destroy;
+destructor TCustomPDFiumControl.Destroy;
 begin
 {$IFDEF ALPHASKINS}
   if Assigned(FScrollWnd) then
@@ -408,7 +439,7 @@ begin
 end;
 
 {$IFDEF ALPHASKINS}
-procedure TPDFiumControl.AfterConstruction;
+procedure TCustomPDFiumControl.AfterConstruction;
 begin
   inherited AfterConstruction;
 
@@ -418,14 +449,14 @@ begin
   UpdateData(FSkinData);
 end;
 
-procedure TPDFiumControl.Loaded;
+procedure TCustomPDFiumControl.Loaded;
 begin
   inherited Loaded;
 
   FSkinData.Loaded(False);
 end;
 
-procedure TPDFiumControl.WndProc(var AMessage: TMessage);
+procedure TCustomPDFiumControl.WndProc(var AMessage: TMessage);
 var
   LPaintStruct: TPaintStruct;
 begin
@@ -523,35 +554,35 @@ begin
 end;
 {$ENDIF}
 
-procedure TPDFiumControl.WMEraseBkgnd(var AMessage: TWMEraseBkgnd);
+procedure TCustomPDFiumControl.WMEraseBkgnd(var AMessage: TWMEraseBkgnd);
 begin
   AMessage.Result := 1;
 end;
 
-procedure TPDFiumControl.WMGetDlgCode(var AMessage: TWMGetDlgCode);
+procedure TCustomPDFiumControl.WMGetDlgCode(var AMessage: TWMGetDlgCode);
 begin
   inherited;
 
   AMessage.Result := AMessage.Result or DLGC_WANTARROWS;
 end;
 
-function TPDFiumControl.IsCurrentPageValid: Boolean;
+function TCustomPDFiumControl.IsCurrentPageValid: Boolean;
 begin
   Result := IsPageIndexValid(PageIndex);
 end;
 
-function TPDFiumControl.GetCurrentPage: TPDFPage;
+function TCustomPDFiumControl.GetCurrentPage: TPDFPage;
 begin
   Result := GetPage(PageIndex);
 end;
 
-procedure TPDFiumControl.DoScroll(const AScrollBarKind: TScrollBarKind);
+procedure TCustomPDFiumControl.DoScroll(const AScrollBarKind: TScrollBarKind);
 begin
   if Assigned(FOnScroll) then
     FOnScroll(Self, AScrollBarKind);
 end;
 
-function TPDFiumControl.DoMouseWheel(AShift: TShiftState; AWheelDelta: Integer; AMousePos: TPoint): Boolean;
+function TCustomPDFiumControl.DoMouseWheel(AShift: TShiftState; AWheelDelta: Integer; AMousePos: TPoint): Boolean;
 begin
   FChanged := True;
 
@@ -562,7 +593,7 @@ begin
   Result := True;
 end;
 
-procedure TPDFiumControl.WMHScroll(var AMessage: TWMHScroll);
+procedure TCustomPDFiumControl.WMHScroll(var AMessage: TWMHScroll);
 begin
   FChanged := True;
 
@@ -572,7 +603,7 @@ begin
   Invalidate;
 end;
 
-procedure TPDFiumControl.WMKeyDown(var AMessage: TWMKeyDown);
+procedure TCustomPDFiumControl.WMKeyDown(var AMessage: TWMKeyDown);
 var
   LShiftState: TShiftState;
 begin
@@ -612,7 +643,7 @@ begin
   inherited;
 end;
 
-procedure TPDFiumControl.WMKeyUp(var AMessage: TWMKeyUp);
+procedure TCustomPDFiumControl.WMKeyUp(var AMessage: TWMKeyUp);
 begin
   if FAllowFormFieldEdit and IsCurrentPageValid and CurrentPage.FormEventKeyUp(AMessage.CharCode,
     KeyDataToShiftState(AMessage.KeyData)) then
@@ -621,7 +652,7 @@ begin
   inherited;
 end;
 
-procedure TPDFiumControl.WMChar(var AMessage: TWMChar);
+procedure TCustomPDFiumControl.WMChar(var AMessage: TWMChar);
 begin
   if FAllowFormFieldEdit and IsCurrentPageValid and CurrentPage.FormEventKeyPress(AMessage.CharCode,
     KeyDataToShiftState(AMessage.KeyData)) then
@@ -630,7 +661,7 @@ begin
   inherited;
 end;
 
-procedure TPDFiumControl.WMKillFocus(var AMessage: TWMKillFocus);
+procedure TCustomPDFiumControl.WMKillFocus(var AMessage: TWMKillFocus);
 begin
   if FAllowFormFieldEdit and IsCurrentPageValid then
     CurrentPage.FormEventKillFocus;
@@ -638,7 +669,7 @@ begin
   inherited;
 end;
 
-procedure TPDFiumControl.UpdatePageIndex;
+procedure TCustomPDFiumControl.UpdatePageIndex;
 var
   LIndex: Integer;
   LPageIndex: Integer;
@@ -658,7 +689,7 @@ begin
   PageIndex := Max(LPageIndex, 0);
 end;
 
-procedure TPDFiumControl.WMVScroll(var AMessage: TWMVScroll);
+procedure TCustomPDFiumControl.WMVScroll(var AMessage: TWMVScroll);
 begin
   FChanged := True;
 
@@ -670,7 +701,7 @@ begin
   Invalidate;
 end;
 
-procedure TPDFiumControl.LoadFromFile(const AFilename: string);
+procedure TCustomPDFiumControl.LoadFromFile(const AFilename: string);
 var
   LPassword: UTF8String;
 begin
@@ -681,6 +712,7 @@ begin
     on E: Exception do
     if FPDF_GetLastError = FPDF_ERR_PASSWORD then
     begin
+      SetPageCount(0);
       LPassword := '';
 
       if Assigned(FOnLoadProtected) then
@@ -697,10 +729,13 @@ begin
       raise;
   end;
 
-  AfterLoad;
+  InternalAfterLoad;
+
+  if Assigned(FOnAfterLoad) then
+    FOnAfterLoad(Self);
 end;
 
-procedure TPDFiumControl.LoadFromStream(const AStream: TStream);
+procedure TCustomPDFiumControl.LoadFromStream(const AStream: TStream);
 var
   LPassword: UTF8String;
 begin
@@ -710,9 +745,12 @@ begin
     on E: Exception do
     if FPDF_GetLastError = FPDF_ERR_PASSWORD then
     begin
+      SetPageCount(0);
       LPassword := '';
+
       if Assigned(FOnLoadProtected) then
         FOnLoadProtected(Self, LPassword);
+
       try
         FPDFDocument.LoadFromStream(AStream, LPassword);
       except
@@ -724,7 +762,10 @@ begin
       raise;
   end;
 
-  AfterLoad;
+  InternalAfterLoad;
+
+  if Assigned(FOnAfterLoad) then
+    FOnAfterLoad(Self);
 end;
 
 {$IFDEF USE_LOAD_FROM_URL}
@@ -744,7 +785,7 @@ begin
   end;
 end;
 
-procedure TPDFiumControl.LoadFromURL(const AURL: string);
+procedure TCustomPDFiumControl.LoadFromURL(const AURL: string);
 var
   LStream: TMemoryStream;
   LHTTPClient: TNetHTTPClient;
@@ -765,7 +806,7 @@ begin
 end;
 {$ENDIF}
 
-procedure TPDFiumControl.AfterLoad;
+procedure TCustomPDFiumControl.InternalAfterLoad;
 begin
   ClearSearch;
 
@@ -780,7 +821,7 @@ begin
   Invalidate;
 end;
 
-procedure TPDFiumControl.CMGesture(var AMessage: TCMGesture);
+procedure TCustomPDFiumControl.CMGesture(var AMessage: TCMGesture);
 begin
   inherited;
 
@@ -788,12 +829,12 @@ begin
   Invalidate;
 end;
 
-function TPDFiumControl.ZoomToScreen: Single;
+function TCustomPDFiumControl.ZoomToScreen: Single;
 begin
   Result := FZoomPercent / 100 * Screen.PixelsPerInch / 72;
 end;
 
-procedure TPDFiumControl.SetPageCount(const AValue: Integer);
+procedure TCustomPDFiumControl.SetPageCount(const AValue: Integer);
 var
   LIndex: Integer;
   LPage: TPDFPage;
@@ -831,7 +872,7 @@ begin
   SetScrollSize;
 end;
 
-procedure TPDFiumControl.SetPageNumber(const AValue: Integer);
+procedure TCustomPDFiumControl.SetPageNumber(const AValue: Integer);
 var
   LValue: Integer;
 begin
@@ -846,7 +887,7 @@ begin
   end;
 end;
 
-procedure TPDFiumControl.SetPageIndex(const AValue: Integer);
+procedure TCustomPDFiumControl.SetPageIndex(const AValue: Integer);
 begin
   if FPageIndex <> AValue then
   begin
@@ -858,7 +899,7 @@ begin
   end;
 end;
 
-procedure TPDFiumControl.PageChanged;
+procedure TCustomPDFiumControl.PageChanged;
 begin
   FSelectionStartCharIndex := 0;
   FSelectionStopCharIndex := 0;
@@ -867,7 +908,7 @@ begin
   GetPageWebLinks;
 end;
 
-procedure TPDFiumControl.SetScrollSize;
+procedure TCustomPDFiumControl.SetScrollSize;
 type
   TScrollInfo = record
     Position: Int64;
@@ -903,14 +944,14 @@ begin
   SetPosition(LVertScrollInfo, VertScrollBar);
 end;
 
-procedure TPDFiumControl.SetSearchHighlightAll(const AValue: Boolean);
+procedure TCustomPDFiumControl.SetSearchHighlightAll(const AValue: Boolean);
 begin
   FSearchHighlightAll := AValue;
 
   Invalidate;
 end;
 
-procedure TPDFiumControl.SetZoomPercent(const AValue: Single);
+procedure TCustomPDFiumControl.SetZoomPercent(const AValue: Single);
 var
   LValue: Single;
 begin
@@ -927,13 +968,13 @@ begin
   DoSizeChanged;
 end;
 
-procedure TPDFiumControl.Zoom(const APercent: Single);
+procedure TCustomPDFiumControl.Zoom(const APercent: Single);
 begin
   FZoomMode := zmPercent;
   SetZoomPercent(APercent);
 end;
 
-procedure TPDFiumControl.DoSizeChanged;
+procedure TCustomPDFiumControl.DoSizeChanged;
 begin
   FChanged := True;
   Invalidate;
@@ -942,13 +983,13 @@ begin
     OnResize(Self);
 end;
 
-procedure TPDFiumControl.SetZoomMode(const AValue: TPDFZoomMode);
+procedure TCustomPDFiumControl.SetZoomMode(const AValue: TPDFZoomMode);
 begin
   FZoomMode := AValue;
   AdjustZoom;
 end;
 
-procedure TPDFiumControl.AdjustZoom;
+procedure TCustomPDFiumControl.AdjustZoom;
 begin
   case FZoomMode of
     zmPercent:
@@ -962,22 +1003,22 @@ begin
   end;
 end;
 
-procedure TPDFiumControl.ClearSelection;
+procedure TCustomPDFiumControl.ClearSelection;
 begin
   SetSelection(False, 0, 0);
 end;
 
-function TPDFiumControl.SearchAll: Integer;
+function TCustomPDFiumControl.SearchAll: Integer;
 begin
   Result := SearchAll(FSearchText, FSearchHighlightAll, FSearchMatchCase, FSearchWholeWords);
 end;
 
-function TPDFiumControl.SearchAll(const ASearchText: string): Integer;
+function TCustomPDFiumControl.SearchAll(const ASearchText: string): Integer;
 begin
   Result := SearchAll(ASearchText, FSearchHighlightAll, FSearchMatchCase, FSearchWholeWords);
 end;
 
-procedure TPDFiumControl.AdjustScrollBar(const APageIndex: Integer);
+procedure TCustomPDFiumControl.AdjustScrollBar(const APageIndex: Integer);
 var
   LRect: TRect;
   LPageRect: TRect;
@@ -993,7 +1034,7 @@ begin
   FChanged := True;
 end;
 
-function TPDFiumControl.SearchAll(const ASearchText: string; const AHighlightAll: Boolean; const AMatchCase: Boolean;
+function TCustomPDFiumControl.SearchAll(const ASearchText: string; const AHighlightAll: Boolean; const AMatchCase: Boolean;
   const AWholeWords: Boolean; const AScrollIntoView: Boolean = True; const APageIndex: Integer = -1): Integer;
 var
   LCount, LRectCount: Integer;
@@ -1090,7 +1131,7 @@ begin
   Invalidate;
 end;
 
-function TPDFiumControl.GetPage(const AIndex: Integer): TPDFPage;
+function TCustomPDFiumControl.GetPage(const AIndex: Integer): TPDFPage;
 begin
   if IsPageIndexValid(AIndex) then
     Result := FPDFDocument.Pages[AIndex]
@@ -1098,7 +1139,7 @@ begin
     Result := nil;
 end;
 
-function TPDFiumControl.FindNext: Integer;
+function TCustomPDFiumControl.FindNext: Integer;
 var
   LPageIndex: Integer;
   LNextPage: Boolean;
@@ -1144,7 +1185,7 @@ begin
   Invalidate;
 end;
 
-function TPDFiumControl.FindPrevious: Integer;
+function TCustomPDFiumControl.FindPrevious: Integer;
 var
   LPageIndex: Integer;
   LPreviousPage: Boolean;
@@ -1190,7 +1231,7 @@ begin
   Invalidate;
 end;
 
-procedure TPDFiumControl.ClearSearch;
+procedure TCustomPDFiumControl.ClearSearch;
 var
   LIndex: Integer;
 begin
@@ -1205,28 +1246,28 @@ begin
   end;
 end;
 
-procedure TPDFiumControl.SaveToFile(const AFilename: string; const AOption: TPdfDocumentSaveOption = dsoRemoveSecurity; const AFileVersion: Integer = -1);
+procedure TCustomPDFiumControl.SaveToFile(const AFilename: string; const AOption: TPdfDocumentSaveOption = dsoRemoveSecurity; const AFileVersion: Integer = -1);
 begin
   FPDFDocument.SaveToFile(AFilename, AOption, AFileVersion);
 end;
 
-procedure TPDFiumControl.SaveToStream(const AStream: TStream; const AOption: TPdfDocumentSaveOption = dsoRemoveSecurity; const AFileVersion: Integer = -1);
+procedure TCustomPDFiumControl.SaveToStream(const AStream: TStream; const AOption: TPdfDocumentSaveOption = dsoRemoveSecurity; const AFileVersion: Integer = -1);
 begin
   FPDFDocument.SaveToStream(AStream, AOption, AFileVersion);
 end;
 
-procedure TPDFiumControl.SelectAll;
+procedure TCustomPDFiumControl.SelectAll;
 begin
   SelectText(0, -1);
 end;
 
-procedure TPDFiumControl.SelectAllFormText;
+procedure TCustomPDFiumControl.SelectAllFormText;
 begin
   if FFormFieldFocused and IsCurrentPageValid then
     CurrentPage.FormSelectAllText;
 end;
 
-procedure TPDFiumControl.SelectText(const ACharIndex: Integer; const ACount: Integer);
+procedure TCustomPDFiumControl.SelectText(const ACharIndex: Integer; const ACount: Integer);
 begin
   if (ACount = 0) or not IsCurrentPageValid then
     ClearSelection
@@ -1239,7 +1280,7 @@ begin
   end;
 end;
 
-procedure TPDFiumControl.CloseDocument;
+procedure TCustomPDFiumControl.CloseDocument;
 begin
   FPDFDocument.Close;
   SetPageCount(0);
@@ -1247,7 +1288,7 @@ begin
   Invalidate;
 end;
 
-procedure TPDFiumControl.CopyFormTextToClipboard;
+procedure TCustomPDFiumControl.CopyFormTextToClipboard;
 var
   LText: string;
 begin
@@ -1259,7 +1300,7 @@ begin
   end;
 end;
 
-procedure TPDFiumControl.CutFormTextToClipboard;
+procedure TCustomPDFiumControl.CutFormTextToClipboard;
 begin
   if FFormFieldFocused and IsCurrentPageValid then
   begin
@@ -1267,7 +1308,7 @@ begin
     CurrentPage.FormReplaceSelection('');
   end;
 end;
-procedure TPDFiumControl.PasteFormTextFromClipboard;
+procedure TCustomPDFiumControl.PasteFormTextFromClipboard;
 begin
   if FFormFieldFocused and IsCurrentPageValid then
   begin
@@ -1281,22 +1322,22 @@ begin
   end;
 end;
 
-procedure TPDFiumControl.CopyToClipboard;
+procedure TCustomPDFiumControl.CopyToClipboard;
 begin
   Clipboard.AsText := GetSelectionText;
 end;
 
-function TPDFiumControl.GetPageNumber: Integer;
+function TCustomPDFiumControl.GetPageNumber: Integer;
 begin
   Result := FPageIndex + 1;
 end;
 
-function TPDFiumControl.PageToScreen(const AValue: Single): Integer;
+function TCustomPDFiumControl.PageToScreen(const AValue: Single): Integer;
 begin
   Result := Round(AValue * ZoomToScreen);
 end;
 
-function TPDFiumControl.GetPageTop(const APageIndex: Integer): Integer;
+function TCustomPDFiumControl.GetPageTop(const APageIndex: Integer): Integer;
 var
   LY: Double;
   LPageIndex: Integer;
@@ -1315,7 +1356,7 @@ begin
   Inc(Result, PageToScreen(LY));
 end;
 
-procedure TPDFiumControl.GoToPage(const AIndex: Integer; const ASetScrollBar: Boolean = True);
+procedure TCustomPDFiumControl.GoToPage(const AIndex: Integer; const ASetScrollBar: Boolean = True);
 begin
   if FPageIndex = AIndex then
     Exit;
@@ -1332,7 +1373,7 @@ begin
   end;
 end;
 
-procedure TPDFiumControl.AdjustPageInfo;
+procedure TCustomPDFiumControl.AdjustPageInfo;
 var
   LIndex: Integer;
   LTop: Double;
@@ -1357,7 +1398,7 @@ begin
     LRect.Height := Round(FPageInfo[LIndex].Height * LScale);
 
     if LRect.Width < LClient.Width - 2 * FPageMargin then
-      LRect.Offset((LClient.Width - LRect.Width) div 2 - LRect.Left, 0);
+      LRect.Offset((LClient.Width - LRect.Width) shr 1 - LRect.Left, 0);
 
     FPageInfo[LIndex].Rect := LRect;
 
@@ -1372,7 +1413,7 @@ begin
   end;
 end;
 
-function TPDFiumControl.GetSelectionText: string;
+function TCustomPDFiumControl.GetSelectionText: string;
 begin
   if FSelectionActive and IsCurrentPageValid then
     Result := CurrentPage.ReadText(SelectionStart, SelectionLength)
@@ -1380,7 +1421,7 @@ begin
     Result := '';
 end;
 
-function TPDFiumControl.GetSelectionLength: Integer;
+function TCustomPDFiumControl.GetSelectionLength: Integer;
 begin
   if FSelectionActive and IsCurrentPageValid then
     Result := Abs(FSelectionStartCharIndex - FSelectionStopCharIndex) + 1
@@ -1388,7 +1429,7 @@ begin
     Result := 0;
 end;
 
-function TPDFiumControl.GetSelectionStart: Integer;
+function TCustomPDFiumControl.GetSelectionStart: Integer;
 begin
   if FSelectionActive and IsCurrentPageValid then
     Result := Min(FSelectionStartCharIndex, FSelectionStopCharIndex)
@@ -1396,7 +1437,7 @@ begin
     Result := 0;
 end;
 
-function TPDFiumControl.GetSelectionRects: TPDFControlRectArray;
+function TCustomPDFiumControl.GetSelectionRects: TPDFControlRectArray;
 var
   LCount: Integer;
   LIndex: Integer;
@@ -1421,7 +1462,7 @@ begin
   Result := nil;
 end;
 
-procedure TPDFiumControl.InvalidateRectDiffs(const AOldRects, ANewRects: TPDFControlRectArray);
+procedure TCustomPDFiumControl.InvalidateRectDiffs(const AOldRects, ANewRects: TPDFControlRectArray);
 
   function ContainsRect(const Rects: TPDFControlRectArray; const ARect: TRect): Boolean;
   var
@@ -1451,7 +1492,7 @@ begin
   end;
 end;
 
-procedure TPDFiumControl.SetSelection(const AActive: Boolean; const AStartIndex, AStopIndex: Integer);
+procedure TCustomPDFiumControl.SetSelection(const AActive: Boolean; const AStartIndex, AStopIndex: Integer);
 var
   LOldRects, LNewRects: TPDFControlRectArray;
 begin
@@ -1469,7 +1510,7 @@ begin
   end;
 end;
 
-function TPDFiumControl.SelectWord(const ACharIndex: Integer): Boolean;
+function TCustomPDFiumControl.SelectWord(const ACharIndex: Integer): Boolean;
 var
   LChar: Char;
   LStartCharIndex, LStopCharIndex, LCharCount: Integer;
@@ -1526,7 +1567,7 @@ begin
   end;
 end;
 
-procedure TPDFiumControl.MouseDown(AButton: TMouseButton; AShift: TShiftState; X, Y: Integer);
+procedure TCustomPDFiumControl.MouseDown(AButton: TMouseButton; AShift: TShiftState; X, Y: Integer);
 var
   LPoint: TPDFPoint;
   LCharIndex: Integer;
@@ -1581,7 +1622,7 @@ begin
   end;
 end;
 
-function TPDFiumControl.GetPageIndexAt(const APoint: TPoint): Integer;
+function TCustomPDFiumControl.GetPageIndexAt(const APoint: TPoint): Integer;
 var
   LIndex: Integer;
 begin
@@ -1593,7 +1634,7 @@ begin
     Exit(LIndex);
 end;
 
-procedure TPDFiumControl.MouseMove(AShift: TShiftState; X, Y: Integer);
+procedure TCustomPDFiumControl.MouseMove(AShift: TShiftState; X, Y: Integer);
 var
   LPoint: TPDFPoint;
   LPage: TPdfPage;
@@ -1674,7 +1715,7 @@ begin
   end;
 end;
 
-procedure TPDFiumControl.MouseUp(AButton: TMouseButton; AShift: TShiftState; X, Y: Integer);
+procedure TCustomPDFiumControl.MouseUp(AButton: TMouseButton; AShift: TShiftState; X, Y: Integer);
 var
   LPage: TPdfPage;
   LPoint: TPDFPoint;
@@ -1725,7 +1766,7 @@ begin
   end;
 end;
 
-function TPDFiumControl.DeviceToPage(const X, Y: Integer): TPDFPoint;
+function TCustomPDFiumControl.DeviceToPage(const X, Y: Integer): TPDFPoint;
 var
   LPage: TPDFPage;
 begin
@@ -1738,7 +1779,7 @@ begin
     Result := TPDFPoint.Empty;
 end;
 
-procedure TPDFiumControl.GetPageWebLinks;
+procedure TCustomPDFiumControl.GetPageWebLinks;
 var
   LPage: TPDFPage;
 begin
@@ -1751,7 +1792,7 @@ begin
     FWebLinksInfo := TPdfPageWebLinksInfo.Create(LPage);
 end;
 
-function TPDFiumControl.IsWebLinkAt(const X, Y: Integer): Boolean;
+function TCustomPDFiumControl.IsWebLinkAt(const X, Y: Integer): Boolean;
 var
   LPoint: TPdfPoint;
 begin
@@ -1766,7 +1807,7 @@ end;
 
 { Note! There is an issue with multiline URLs in PDF - PDFium.dll returns the url using a hyphen as a word wrap separator.
   The hyphen is a valid character in the url, so it can't just be removed. }
-function TPDFiumControl.IsWebLinkAt(const X, Y: Integer; var AURL: string): Boolean;
+function TCustomPDFiumControl.IsWebLinkAt(const X, Y: Integer; var AURL: string): Boolean;
 var
   LPoint: TPDFPoint;
 begin
@@ -1781,7 +1822,7 @@ begin
     Result := False;
 end;
 
-function TPDFiumControl.IsAnnotationLinkAt(const X, Y: Integer; out AURL: string; out APageIndex: Integer; out ALinkRect: TRect): Boolean;
+function TCustomPDFiumControl.IsAnnotationLinkAt(const X, Y: Integer; out AURL: string; out APageIndex: Integer; out ALinkRect: TRect): Boolean;
 var
   LPage: TPDFPage;
   LPoint: TPdfPoint;
@@ -1826,7 +1867,7 @@ begin
   Result := True;
 end;
 
-procedure TPDFiumControl.ShowHint(const AHint: string; const ARect: TRect);
+procedure TCustomPDFiumControl.ShowHint(const AHint: string; const ARect: TRect);
 var
   LHintWindow: THintWindow;
   LRect: TRect;
@@ -1840,18 +1881,18 @@ begin
   LHintWindow.Update;
 end;
 
-procedure TPDFiumControl.HideHint;
+procedure TCustomPDFiumControl.HideHint;
 begin
   if Assigned(GHintWindow) then
     ShowWindow(GHintWindow.Handle, SW_HIDE);
 end;
 
-procedure TPDFiumControl.GotoNextPage;
+procedure TCustomPDFiumControl.GotoNextPage;
 begin
   GoToPage(FPageIndex + 1);
 end;
 
-procedure TPDFiumControl.WMPaint(var AMessage: TWMPaint);
+procedure TCustomPDFiumControl.WMPaint(var AMessage: TWMPaint);
 begin
   ControlState := ControlState + [csCustomPaint];
 
@@ -1860,7 +1901,7 @@ begin
   ControlState := ControlState - [csCustomPaint];
 end;
 
-function TPDFiumControl.PageHeightZoomPercent: Single;
+function TCustomPDFiumControl.PageHeightZoomPercent: Single;
 var
   LScale: Single;
   LZoom1, LZoom2: Single;
@@ -1878,7 +1919,7 @@ begin
   Result := 100 * LZoom1;
 end;
 
-function TPDFiumControl.PageWidthZoomPercent: Single;
+function TCustomPDFiumControl.PageWidthZoomPercent: Single;
 var
   LScale: Single;
 begin
@@ -1889,7 +1930,7 @@ begin
   Result := 100 * (ClientWidth - 2 * FPageMargin) * LScale / Max(FWidth, 1);
 end;
 
-function TPDFiumControl.SetSelStopCharIndex(const X, Y: Integer): Boolean;
+function TCustomPDFiumControl.SetSelStopCharIndex(const X, Y: Integer): Boolean;
 var
   LPoint: TPDFPoint;
   LCharIndex: Integer;
@@ -1918,7 +1959,7 @@ begin
   SetSelection(LActive, FSelectionStartCharIndex, LCharIndex);
 end;
 
-procedure TPDFiumControl.SetFocus;
+procedure TCustomPDFiumControl.SetFocus;
 begin
   if CanFocus then
   begin
@@ -1928,7 +1969,7 @@ begin
   end;
 end;
 
-procedure TPDFiumControl.PaintWindow(ADC: HDC);
+procedure TCustomPDFiumControl.PaintWindow(ADC: HDC);
 var
   LIndex: Integer;
   LPage: TPDFPage;
@@ -1979,7 +2020,7 @@ begin
   end;
 end;
 
-procedure TPDFiumControl.PaintPage(ADC: HDC; const APage: TPDFPage; const AIndex: Integer);
+procedure TCustomPDFiumControl.PaintPage(ADC: HDC; const APage: TPDFPage; const AIndex: Integer);
 var
   LRect: TRect;
   LPoint: TPoint;
@@ -1996,7 +2037,7 @@ begin
     FPDF_RenderPage(ADC, APage.Handle, Rect.Left, Rect.Top, Rect.Width, Rect.Height, Ord(Rotation), 0);
 end;
 
-procedure TPDFiumControl.PaintPageSelection(ADC: HDC; const APage: TPDFPage; const AIndex: Integer);
+procedure TCustomPDFiumControl.PaintPageSelection(ADC: HDC; const APage: TPDFPage; const AIndex: Integer);
 var
   LCount: Integer;
   LIndex: Integer;
@@ -2015,7 +2056,7 @@ begin
   end;
 end;
 
-procedure TPDFiumControl.PaintPage(ADC: HDC; const ARect: TRect; const AIndex: Integer);
+procedure TCustomPDFiumControl.PaintPage(ADC: HDC; const ARect: TRect; const AIndex: Integer);
 var
   LPage: TPDFPage;
 begin
@@ -2026,18 +2067,18 @@ begin
   end;
 end;
 
-procedure TPDFiumControl.PaintPageSearchResults(ADC: HDC; const APage: TPDFPage; const AIndex: Integer);
+procedure TCustomPDFiumControl.PaintPageSearchResults(ADC: HDC; const APage: TPDFPage; const AIndex: Integer);
 begin
   if Length(FPageInfo[AIndex].SearchRects) > 0 then
     PaintAlphaSelection(ADC, APage, FPageInfo[AIndex].SearchRects, AIndex, RGB(204, 224, 204));
 end;
 
-function TPDFiumControl.InternPageToDevice(const APage: TPDFPage; const APageRect: TPDFRect; const ARect: TRect): TRect;
+function TCustomPDFiumControl.InternPageToDevice(const APage: TPDFPage; const APageRect: TPDFRect; const ARect: TRect): TRect;
 begin
   Result := APage.PageToDevice(ARect.Left, ARect.Top, ARect.Width, ARect.Height, APageRect, APage.Rotation);
 end;
 
-procedure TPDFiumControl.PaintAlphaSelection(ADC: HDC; const APage: TPDFPage; const ARects: TPDFControlPDFRectArray;
+procedure TCustomPDFiumControl.PaintAlphaSelection(ADC: HDC; const APage: TPDFPage; const ARects: TPDFControlPDFRectArray;
   const AIndex: Integer; const AColor: TColor = TColors.SysNone);
 var
   LCount: Integer;
@@ -2104,7 +2145,7 @@ begin
   end;
 end;
 
-procedure TPDFiumControl.PaintPageBorder(ADC: HDC; const ARect: TRect);
+procedure TCustomPDFiumControl.PaintPageBorder(ADC: HDC; const ARect: TRect);
 var
   LPen: HPen;
 begin
@@ -2121,12 +2162,12 @@ begin
   end;
 end;
 
-procedure TPDFiumControl.GotoPreviousPage;
+procedure TCustomPDFiumControl.GotoPreviousPage;
 begin
   GoToPage(FPageIndex - 1);
 end;
 
-procedure TPDFiumControl.Print;
+procedure TCustomPDFiumControl.Print;
 begin
   try
     TPDFDocumentVclPrinter.PrintDocument(FPDFDocument, PrintJobTitle);
@@ -2136,7 +2177,7 @@ begin
   end;
 end;
 
-procedure TPDFiumControl.Resize;
+procedure TCustomPDFiumControl.Resize;
 begin
   inherited;
 
@@ -2145,17 +2186,17 @@ begin
   Invalidate;
 end;
 
-function TPDFiumControl.IsPageIndexValid(const APageIndex: Integer): Boolean;
+function TCustomPDFiumControl.IsPageIndexValid(const APageIndex: Integer): Boolean;
 begin
   Result := FPDFDocument.Active and (APageIndex >= 0) and (APageIndex < FPageCount);
 end;
 
-function TPDFiumControl.IsTextSelected: Boolean;
+function TCustomPDFiumControl.IsTextSelected: Boolean;
 begin
   Result := SelectionLength <> 0;
 end;
 
-procedure TPDFiumControl.RotatePageClockwise;
+procedure TCustomPDFiumControl.RotatePageClockwise;
 var
   LPage: TPDFPage;
 begin
@@ -2186,7 +2227,7 @@ begin
   DoSizeChanged;
 end;
 
-procedure TPDFiumControl.RotatePageCounterClockwise;
+procedure TCustomPDFiumControl.RotatePageCounterClockwise;
 var
   LPage: TPDFPage;
 begin
@@ -2217,19 +2258,19 @@ begin
   DoSizeChanged;
 end;
 
-procedure TPDFiumControl.ZoomToHeight;
+procedure TCustomPDFiumControl.ZoomToHeight;
 begin
   ZoomMode := zmFitHeight;
   DoSizeChanged;
 end;
 
-procedure TPDFiumControl.ZoomToWidth;
+procedure TCustomPDFiumControl.ZoomToWidth;
 begin
   ZoomMode := zmFitWidth;
   DoSizeChanged;
 end;
 
-procedure TPDFiumControl.FormOutputSelectedRect(ADocument: TPDFDocument; APage: TPDFPage; const APageRect: TPDFRect);
+procedure TCustomPDFiumControl.FormOutputSelectedRect(ADocument: TPDFDocument; APage: TPDFPage; const APageRect: TPDFRect);
 begin
   if HandleAllocated then
   begin
@@ -2238,12 +2279,12 @@ begin
   end;
 end;
 
-procedure TPDFiumControl.FormGetCurrentPage(ADocument: TPDFDocument; var APage: TPDFPage);
+procedure TCustomPDFiumControl.FormGetCurrentPage(ADocument: TPDFDocument; var APage: TPDFPage);
 begin
   APage := CurrentPage;
 end;
 
-procedure TPDFiumControl.FormInvalidate(ADocument: TPdfDocument; APage: TPdfPage; const APageRect: TPdfRect);
+procedure TCustomPDFiumControl.FormInvalidate(ADocument: TPdfDocument; APage: TPdfPage; const APageRect: TPdfRect);
 var
   LRect: TRect;
 begin
@@ -2256,13 +2297,13 @@ begin
   end;
 end;
 
-procedure TPDFiumControl.FormFieldFocus(ADocument: TPDFDocument; AValue: PWideChar; AValueLen: Integer; AFieldFocused: Boolean);
+procedure TCustomPDFiumControl.FormFieldFocus(ADocument: TPDFDocument; AValue: PWideChar; AValueLen: Integer; AFieldFocused: Boolean);
 begin
   ClearSelection;
   FFormFieldFocused := AFieldFocused;
 end;
 
-procedure TPDFiumControl.ShowError(const AMessage: string);
+procedure TCustomPDFiumControl.ShowError(const AMessage: string);
 begin
 {$IFDEF ALPHASKINS}
   sMessageDlg(AMessage, mtError, [mbOK], 0);
@@ -2271,7 +2312,7 @@ begin
 {$ENDIF}
 end;
 
-procedure TPDFiumControl.KeyDown(var Key: Word; Shift: TShiftState);
+procedure TCustomPDFiumControl.KeyDown(var Key: Word; Shift: TShiftState);
 const
   DefaultScrollOffset = 50;
 begin
@@ -2329,9 +2370,9 @@ begin
   end;
 end;
 
-{ TPDFiumControlThumbnails }
+{ TCustomPDFiumControlThumbnails }
 
-constructor TPDFiumControlThumbnails.Create(AOwner: TComponent);
+constructor TCustomPDFiumControlThumbnails.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
 
@@ -2355,7 +2396,7 @@ begin
 end;
 
 {$IFDEF ALPHASKINS}
-destructor TPDFiumControlThumbnails.Destroy;
+destructor TCustomPDFiumControlThumbnails.Destroy;
 begin
   if Assigned(FScrollWnd) then
   begin
@@ -2372,7 +2413,7 @@ begin
   inherited;
 end;
 
-procedure TPDFiumControlThumbnails.AfterConstruction;
+procedure TCustomPDFiumControlThumbnails.AfterConstruction;
 begin
   inherited AfterConstruction;
 
@@ -2382,14 +2423,14 @@ begin
   UpdateData(FSkinData);
 end;
 
-procedure TPDFiumControlThumbnails.Loaded;
+procedure TCustomPDFiumControlThumbnails.Loaded;
 begin
   inherited Loaded;
 
   FSkinData.Loaded(False);
 end;
 
-procedure TPDFiumControlThumbnails.WndProc(var AMessage: TMessage);
+procedure TCustomPDFiumControlThumbnails.WndProc(var AMessage: TMessage);
 var
   LPaintStruct: TPaintStruct;
 begin
@@ -2483,7 +2524,7 @@ begin
 end;
 {$ENDIF}
 
-procedure TPDFiumControlThumbnails.DrawCell(ACol, ARow: Longint; ARect: TRect; AState: TGridDrawState);
+procedure TCustomPDFiumControlThumbnails.DrawCell(ACol, ARow: Longint; ARect: TRect; AState: TGridDrawState);
 var
   LRect: TRect;
 begin
@@ -2561,7 +2602,7 @@ begin
 end;
 
 { https://quality.embarcadero.com/browse/RSP-18542 }
-procedure TPDFiumControlThumbnails.MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
+procedure TCustomPDFiumControlThumbnails.MouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
 begin
   FTimerStarted := False;
 
@@ -2576,7 +2617,7 @@ begin
     KillTimer(Handle, 1);
 end;
 
-procedure TPDFiumControlThumbnails.MouseMove(Shift: TShiftState; X, Y: Integer);
+procedure TCustomPDFiumControlThumbnails.MouseMove(Shift: TShiftState; X, Y: Integer);
 begin
   if not FTimerStarted and (FGridState = gsSelecting) then
   begin
@@ -2587,14 +2628,14 @@ begin
   inherited;
 end;
 
-procedure TPDFiumControlThumbnails.Resize;
+procedure TCustomPDFiumControlThumbnails.Resize;
 begin
   inherited Resize;
 
   SetDefaultSize;
 end;
 
-procedure TPDFiumControlThumbnails.SetDefaultSize;
+procedure TCustomPDFiumControlThumbnails.SetDefaultSize;
 var
   LPage: TPDFPage;
   LHeigth: Integer;
@@ -2616,7 +2657,7 @@ begin
   end;
 end;
 
-procedure TPDFiumControlThumbnails.DoPDFiumControlPageChanged(Sender: TObject);
+procedure TCustomPDFiumControlThumbnails.DoPDFiumControlPageChanged(Sender: TObject);
 begin
   if Visible then
   begin
@@ -2625,13 +2666,19 @@ begin
   end;
 end;
 
-procedure TPDFiumControlThumbnails.SetPDFiumControl(const AValue: TPDFiumControl);
+procedure TCustomPDFiumControlThumbnails.DoPDFiumControlAfterLoad(Sender: TObject);
+begin
+  FDefaultSizeSet := False;
+end;
+
+procedure TCustomPDFiumControlThumbnails.SetPDFiumControl(const AValue: TPDFiumControl);
 begin
   FPDFiumControl := AValue;
   FPDFiumControl.OnPageChanged := DoPDFiumControlPageChanged;
+  FPDFiumControl.OnAfterLoad := DoPDFiumControlAfterLoad;
 end;
 
-function TPDFiumControlThumbnails.SelectCell(ACol, ARow: Longint): Boolean;
+function TCustomPDFiumControlThumbnails.SelectCell(ACol, ARow: Longint): Boolean;
 begin
   Result := inherited;
 
