@@ -105,6 +105,7 @@ type
     procedure AdjustScrollBar(const APageIndex: Integer);
     procedure AdjustZoom;
     procedure CMGesture(var AMessage: TCMGesture); message CM_GESTURE;
+    procedure CMMouseLeave(var AMessage: TMessage); message CM_MOUSELEAVE;
     procedure DoScroll(const AScrollBarKind: TScrollBarKind);
     procedure DoSizeChanged;
     procedure FormFieldFocus(ADocument: TPDFDocument; AValue: PWideChar; AValueLen: Integer; AFieldFocused: Boolean);
@@ -330,7 +331,7 @@ uses
   , System.Net.HttpClientComponent, System.Net.HttpClient
 {$ENDIF}
 {$IFDEF ALPHASKINS}
-  , sConst, sDialogs, sMessages, sStyleSimply, sVCLUtils
+  , sConst, sDialogs, sSkinManager, sMessages, sStyleSimply, sVCLUtils
 {$ENDIF};
 
 var
@@ -827,6 +828,13 @@ begin
 
   FChanged := True;
   Invalidate;
+end;
+
+procedure TCustomPDFiumControl.CMMouseLeave(var AMessage: TMessage);
+begin
+  inherited;
+
+  HideHint;
 end;
 
 function TCustomPDFiumControl.ZoomToScreen: Single;
