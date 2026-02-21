@@ -1,6 +1,8 @@
 # TPDFiumControl
 
-Page scrolling PDF control for Delphi.
+Legacy version of the page scrolling PDF control for Delphi.
+
+Latest version for Delphi 13+ https://codeberg.org/TextEditorPro/TPDFiumControl 
 
 ## Requires 
 
@@ -19,11 +21,3 @@ ALPHASKINS | Native AlphaSkins support
 ## License
 
 [MIT](https://github.com/TextEditorPro/TTextEditor/blob/main/LICENSE)
-
-## Connect 
-
-https://www.linkedin.com/in/lassemarkusrautiainen/
-
-## Donations
-
-https://ko-fi.com/texteditorpro

@@ -1990,7 +1990,7 @@ begin
     if not Assigned(FPDFDocument) or (FPageCount = 0) then
       Exit;
 
-    if FChanged or (FPageCount = 0) then
+    if FChanged then
     begin
       AdjustPageInfo;
       FChanged := False;
@@ -2155,9 +2155,10 @@ end;
 
 procedure TCustomPDFiumControl.PaintPageBorder(ADC: HDC; const ARect: TRect);
 var
-  LPen: HPen;
+  LPen, LOldPen: HPen;
 begin
   LPen := CreatePen(PS_SOLID, 1, FPageBorderColor);
+  LOldPen := SelectObject(ADC, LPen);
   try
     SelectObject(ADC, LPen);
     MoveToEx(ADC, ARect.Left, ARect.Top, nil);
@@ -2166,6 +2167,7 @@ begin
     LineTo(ADC, ARect.Left, ARect.Top + ARect.Height - 1);
     LineTo(ADC, ARect.Left, ARect.top);
   finally
+    SelectObject(ADC, LOldPen);
     DeleteObject(LPen);
   end;
 end;
@@ -2349,9 +2351,9 @@ begin
         Key := 0;
       end;
     VK_RIGHT:
-      HorzScrollBar.Position := HorzScrollBar.Position - DefaultScrollOffset;
-    VK_LEFT:
       HorzScrollBar.Position := HorzScrollBar.Position + DefaultScrollOffset;
+    VK_LEFT:
+      HorzScrollBar.Position := HorzScrollBar.Position - DefaultScrollOffset;
     VK_UP:
       VertScrollBar.Position := VertScrollBar.Position - DefaultScrollOffset;
     VK_DOWN:
@@ -2646,7 +2648,7 @@ end;
 procedure TCustomPDFiumControlThumbnails.SetDefaultSize;
 var
   LPage: TPDFPage;
-  LHeigth: Integer;
+  LHeight: Integer;
 begin
   if not Assigned(PDFiumControl) then
     Exit;
@@ -2658,10 +2660,10 @@ begin
 
   if Assigned(LPage) then
   begin
-    LHeigth := Round(((DefaultColWidth - 8) / LPage.Width) * LPage.Height);
+    LHeight := Round(((DefaultColWidth - 8) / LPage.Width) * LPage.Height);
 
-    if DefaultRowHeight <> LHeigth then
-      DefaultRowHeight := LHeigth;
+    if DefaultRowHeight <> LHeight then
+      DefaultRowHeight := LHeight;
   end;
 end;
 
@@ -2682,8 +2684,12 @@ end;
 procedure TCustomPDFiumControlThumbnails.SetPDFiumControl(const AValue: TPDFiumControl);
 begin
   FPDFiumControl := AValue;
-  FPDFiumControl.OnPageChanged := DoPDFiumControlPageChanged;
-  FPDFiumControl.OnAfterLoad := DoPDFiumControlAfterLoad;
+
+  if Assigned(FPDFiumControl) then
+	begin
+    FPDFiumControl.OnPageChanged := DoPDFiumControlPageChanged;
+    FPDFiumControl.OnAfterLoad := DoPDFiumControlAfterLoad;
+  end;
 end;
 
 function TCustomPDFiumControlThumbnails.SelectCell(ACol, ARow: Longint): Boolean;
