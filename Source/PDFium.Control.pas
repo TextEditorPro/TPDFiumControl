@@ -1,12 +1,10 @@
 ﻿unit PDFium.Control;
 
-{.$DEFINE USE_LOAD_FROM_URL}
-
 interface
 
 uses
-  Winapi.Messages, Winapi.Windows, System.Classes, System.Math, System.SysUtils, System.UITypes, System.Variants,
-  Vcl.Controls, Vcl.Dialogs, Vcl.ExtCtrls, Vcl.Forms, Vcl.Graphics, Vcl.Grids, PDFiumCore, PDFiumLib
+  Winapi.Messages, Winapi.Windows, System.Classes, System.Generics.Collections, System.Math, System.SysUtils, System.UITypes, Vcl.Controls,
+  Vcl.Dialogs, Vcl.Forms, Vcl.Graphics, Vcl.Grids, PDFiumCore, PDFiumLib
 {$IFDEF ALPHASKINS}
   , acSBUtils, sCommonData
 {$ENDIF};
@@ -40,6 +38,16 @@ type
     function Page: FPDF_PAGE;
   end;
 
+  TPDFPageBitmapCacheEntry = class
+    Bitmap: TBitmap;
+    LastUsed: Int64;
+    PageIndex: Integer;
+    Rotation: TPDFPageRotation;
+    ZoomPercent: Single;
+    constructor Create;
+    destructor Destroy; override;
+  end;
+
   TCustomPDFiumControl = class(TScrollingWinControl)
   strict private
     FAllowFormFieldEdit: Boolean;
@@ -50,6 +58,7 @@ type
     FFormFieldFocused: Boolean;
     FFormOutputSelectedRects: TPDFControlPDFRectArray;
     FHeight: Single;
+    FHitPageIndex: Integer;
     FMouseDownPoint: TPoint;
     FMousePressed: Boolean;
     FOnAfterLoad: TNotifyEvent;
@@ -59,6 +68,9 @@ type
     FOnPaint: TNotifyEvent;
     FOnScroll: TPDFControlScrollEvent;
     FPageBorderColor: TColor;
+    FPageCache: TObjectList<TPDFPageBitmapCacheEntry>;
+    FPageCacheCounter: Int64;
+    FPageCacheEnabled: Boolean;
     FPageCount: Integer;
     FPageIndex: Integer;
     FPageInfo: TArray<TPageInfo>;
@@ -85,8 +97,10 @@ type
     FZoomMode: TPDFZoomMode;
     FZoomPercent: Single;
     function CreatePDFDocument: TPDFDocument;
-    function DeviceToPage(const X, Y: Integer): TPDFPoint;
+    function DeviceToPage(const X, Y: Integer): TPDFPoint; overload;
+    function DeviceToPage(const X, Y, APageIndex: Integer): TPDFPoint; overload;
     function GetCurrentPage: TPDFPage;
+    function GetPageCacheBitmap(const APage: TPDFPage; const AIndex: Integer): TBitmap;
     function GetPageIndexAt(const APoint: TPoint): Integer;
     function GetSelectionLength: Integer;
     function GetSelectionRects: TPDFControlRectArray;
@@ -104,6 +118,7 @@ type
     procedure AdjustPageInfo;
     procedure AdjustScrollBar(const APageIndex: Integer);
     procedure AdjustZoom;
+    procedure ClearPageCache;
     procedure CMGesture(var AMessage: TCMGesture); message CM_GESTURE;
     procedure CMMouseLeave(var AMessage: TMessage); message CM_MOUSELEAVE;
     procedure DoScroll(const AScrollBarKind: TScrollBarKind);
@@ -116,6 +131,7 @@ type
     procedure HideHint;
     procedure InternalAfterLoad;
     procedure InvalidateRectDiffs(const AOldRects, ANewRects: TPDFControlRectArray);
+    procedure LoadDocument(const ALoadProc: TProc<UTF8String>);
     procedure PageChanged;
     procedure PaintAlphaSelection(ADC: HDC; const APage: TPDFPage; const ARects: TPDFControlPDFRectArray; const AIndex: Integer;
       const AColor: TColor = TColors.SysNone);
@@ -123,6 +139,8 @@ type
     procedure PaintPageBorder(ADC: HDC; const ARect: TRect);
     procedure PaintPageSearchResults(ADC: HDC; const APage: TPDFPage; const AIndex: Integer);
     procedure PaintPageSelection(ADC: HDC; const APage: TPDFPage; const AIndex: Integer);
+    procedure RefreshScrollBars;
+    procedure RotatePage(const AClockwise: Boolean = True);
     procedure SetPageCount(const AValue: Integer);
     procedure SetPageIndex(const AValue: Integer);
     procedure SetPageNumber(const AValue: Integer);
@@ -132,6 +150,7 @@ type
     procedure SetZoomMode(const AValue: TPDFZoomMode);
     procedure SetZoomPercent(const AValue: Single);
     procedure ShowHint(const AHint: string; const ARect: TRect);
+    procedure UpdateHitPageIndex(const APoint: TPoint);
     procedure UpdatePageIndex;
     procedure WMChar(var AMessage: TWMChar); message WM_CHAR;
     procedure WMEraseBkGnd(var AMessage: TWMEraseBkgnd); message WM_ERASEBKGND;
@@ -326,13 +345,18 @@ type
 implementation
 
 uses
-  System.Character, System.Generics.Collections, System.Generics.Defaults, System.Types, Vcl.Clipbrd, Vcl.Printers
-{$IFDEF USE_LOAD_FROM_URL}
-  , System.Net.HttpClientComponent, System.Net.HttpClient
-{$ENDIF}
+  System.Character, System.Generics.Defaults, System.Types, Vcl.Clipbrd, Vcl.Printers, Vcl.Themes
 {$IFDEF ALPHASKINS}
   , sConst, sDialogs, sSkinManager, sMessages, sStyleSimply, sVCLUtils
+{$ENDIF}
+{$IFDEF USE_LOAD_FROM_URL}
+  , System.Net.HttpClientComponent, System.Net.HttpClient
 {$ENDIF};
+
+const
+  CMaxCachedPages = 6;
+  { Pages larger than this are rendered directly to the device context so the cache memory usage stays bounded. }
+  CMaxCachedPagePixels = 8000000;
 
 var
   GHintWindow: THintWindow;
@@ -356,6 +380,22 @@ begin
   Result := FPage;
 end;
 
+{ TPDFPageBitmapCacheEntry }
+
+constructor TPDFPageBitmapCacheEntry.Create;
+begin
+  inherited Create;
+
+  Bitmap := TBitmap.Create;
+end;
+
+destructor TPDFPageBitmapCacheEntry.Destroy;
+begin
+  Bitmap.Free;
+
+  inherited;
+end;
+
 { TCustomPDFiumControl }
 
 constructor TCustomPDFiumControl.Create(AOwner: TComponent);
@@ -373,11 +413,15 @@ begin
   FZoomMode := zmActualSize;
   FZoomPercent := 100;
   FPageIndex := 0;
+  FHitPageIndex := 0;
   FPageMargin := 6;
   FPrintJobTitle := 'Print PDF';
   FAllowFormFieldEdit := False;
   FAllowTextSelection := True;
   FDrawOptions := CDefaultDrawOptions;
+
+  FPageCache := TObjectList<TPDFPageBitmapCacheEntry>.Create(True);
+  FPageCacheEnabled := True;
 
   if not (csDesigning in ComponentState) then
     FPDFDocument := CreatePDFDocument;
@@ -436,6 +480,8 @@ begin
   if Assigned(FPDFDocument) then
     FPDFDocument.Free;
 
+  FPageCache.Free;
+
   inherited;
 end;
 
@@ -444,10 +490,10 @@ procedure TCustomPDFiumControl.AfterConstruction;
 begin
   inherited AfterConstruction;
 
+  FSkinData.Loaded(False);
+
   if HandleAllocated then
     RefreshEditScrolls(SkinData, FScrollWnd);
-
-  UpdateData(FSkinData);
 end;
 
 procedure TCustomPDFiumControl.Loaded;
@@ -583,13 +629,25 @@ begin
     FOnScroll(Self, AScrollBarKind);
 end;
 
+procedure TCustomPDFiumControl.RefreshScrollBars;
+begin
+  if HandleAllocated then
+    SendMessage(Handle, WM_NCPAINT, 1, 0);
+end;
+
 function TCustomPDFiumControl.DoMouseWheel(AShift: TShiftState; AWheelDelta: Integer; AMousePos: TPoint): Boolean;
 begin
+  Result := inherited DoMouseWheel(AShift, AWheelDelta, AMousePos);
+
+  if Result then
+    Exit;
+
   FChanged := True;
 
-  VertScrollBar.Position := VertScrollBar.Position - AWheelDelta;
+  VertScrollBar.Position := Max(VertScrollBar.Position - AWheelDelta, 0);
   UpdatePageIndex;
   DoScroll(sbVertical);
+  RefreshScrollBars;
 
   Result := True;
 end;
@@ -636,9 +694,9 @@ begin
             end;
           end;
       end;
-    end;
 
-    Exit;
+      Exit;
+    end;
   end;
 
   inherited;
@@ -668,6 +726,19 @@ begin
     CurrentPage.FormEventKillFocus;
 
   inherited;
+end;
+
+procedure TCustomPDFiumControl.UpdateHitPageIndex(const APoint: TPoint);
+var
+  LPageIndex: Integer;
+begin
+  LPageIndex := GetPageIndexAt(APoint);
+
+  if (LPageIndex <> FHitPageIndex) or not Assigned(FWebLinksInfo) then
+  begin
+    FHitPageIndex := LPageIndex;
+    GetPageWebLinks;
+  end;
 end;
 
 procedure TCustomPDFiumControl.UpdatePageIndex;
@@ -703,61 +774,42 @@ begin
 end;
 
 procedure TCustomPDFiumControl.LoadFromFile(const AFilename: string);
-var
-  LPassword: UTF8String;
 begin
-  FFilename := AFilename;
-  try
-    FPDFDocument.LoadFromFile(AFilename);
-  except
-    on E: Exception do
-    if FPDF_GetLastError = FPDF_ERR_PASSWORD then
+  LoadDocument(
+    procedure(APassword: UTF8String)
     begin
-      SetPageCount(0);
-      LPassword := '';
-
-      if Assigned(FOnLoadProtected) then
-        FOnLoadProtected(Self, LPassword);
-
-      try
-        FPDFDocument.LoadFromFile(AFilename, LPassword);
-      except
-        on E: Exception do
-          raise;
-      end;
-    end
-    else
-      raise;
-  end;
-
-  InternalAfterLoad;
-
-  if Assigned(FOnAfterLoad) then
-    FOnAfterLoad(Self);
+      FPDFDocument.LoadFromFile(AFilename, APassword);
+      FFilename := AFilename;
+    end);
 end;
 
 procedure TCustomPDFiumControl.LoadFromStream(const AStream: TStream);
-var
+begin
+  LoadDocument(
+    procedure(APassword: UTF8String)
+    begin
+      FPDFDocument.LoadFromStream(AStream, APassword);
+    end);
+end;
+
+procedure TCustomPDFiumControl.LoadDocument(const ALoadProc: TProc<UTF8String>);
+var 
   LPassword: UTF8String;
 begin
   try
-    FPDFDocument.LoadFromStream(AStream);
+    ALoadProc('');
   except
     on E: Exception do
     if FPDF_GetLastError = FPDF_ERR_PASSWORD then
     begin
       SetPageCount(0);
+
       LPassword := '';
 
       if Assigned(FOnLoadProtected) then
         FOnLoadProtected(Self, LPassword);
 
-      try
-        FPDFDocument.LoadFromStream(AStream, LPassword);
-      except
-        on E: Exception do
-          raise;
-      end;
+      ALoadProc(LPassword);
     end
     else
       raise;
@@ -847,8 +899,13 @@ var
   LIndex: Integer;
   LPage: TPDFPage;
 begin
+  ClearPageCache;
+  FPageCacheEnabled := True;
+
   FPageCount := AValue;
   FPageIndex := 0;
+  FHitPageIndex := 0;
+  FreeAndNil(FWebLinksInfo);
   FWidth := 0;
   FHeight := 0;
 
@@ -888,10 +945,10 @@ begin
 
   if IsPageIndexValid(LValue) and (FPageIndex <> LValue) then
   begin
-    FPageIndex := LValue;
+    PageIndex := LValue;
     FChanged := True;
     VertScrollBar.Position := GetPageTop(FPageIndex);
-    PageChanged;
+    RefreshScrollBars;
   end;
 end;
 
@@ -912,8 +969,6 @@ begin
   FSelectionStartCharIndex := 0;
   FSelectionStopCharIndex := 0;
   FSelectionActive := False;
-
-  GetPageWebLinks;
 end;
 
 procedure TCustomPDFiumControl.SetScrollSize;
@@ -965,6 +1020,7 @@ var
 begin
   LValue := AValue;
 
+  { Zoom limits match Adobe Acrobat: 0.65% .. 6400% }
   if LValue < 0.65 then
     LValue := 0.65
   else
@@ -1035,11 +1091,12 @@ begin
   begin
     LPageRect := System.Types.Rect(0, 0, Round(Width), Round(Height));
     LRect := InternPageToDevice(FPDFDocument.Pages[APageIndex], SearchRects[SearchCurrentIndex], LPageRect);
-    VertScrollBar.Position := GetPageTop(APageIndex) + Round( (VertScrollBar.Range / PageCount) *
-      LRect.Top / LPageRect.Height ) - 2 * LRect.Height;
+
+    VertScrollBar.Position := GetPageTop(APageIndex) + Round( (VertScrollBar.Range / PageCount) * LRect.Top / LPageRect.Height ) - 2 * LRect.Height;
   end;
 
   FChanged := True;
+  RefreshScrollBars;
 end;
 
 function TCustomPDFiumControl.SearchAll(const ASearchText: string; const AHighlightAll: Boolean; const AMatchCase: Boolean;
@@ -1149,7 +1206,7 @@ end;
 
 function TCustomPDFiumControl.FindNext: Integer;
 var
-  LPageIndex: Integer;
+  LPageIndex, LFoundPageIndex: Integer;
   LNextPage: Boolean;
 begin
   Result := FSearchIndex;
@@ -1160,6 +1217,7 @@ begin
   Inc(FSearchIndex);
 
   LNextPage := False;
+  LFoundPageIndex := -1;
 
   for LPageIndex := 0 to FPageCount - 1 do
   with FPageInfo[LPageIndex] do
@@ -1167,6 +1225,7 @@ begin
     if LNextPage and (Length(SearchRects) > 0) then
     begin
       SearchCurrentIndex := 0;
+      LFoundPageIndex := LPageIndex;
       Break;
     end
     else
@@ -1175,6 +1234,7 @@ begin
       if SearchCurrentIndex + 1 < Length(SearchRects) then
       begin
         Inc(SearchCurrentIndex);
+        LFoundPageIndex := LPageIndex;
         Break;
       end
       else
@@ -1185,8 +1245,11 @@ begin
     end;
   end;
 
-  GoToPage(LPageIndex, False);
-  AdjustScrollBar(LPageIndex);
+  if LFoundPageIndex <> -1 then
+  begin
+    GoToPage(LFoundPageIndex, False);
+    AdjustScrollBar(LFoundPageIndex);
+  end;
 
   Result := FSearchIndex;
 
@@ -1195,7 +1258,7 @@ end;
 
 function TCustomPDFiumControl.FindPrevious: Integer;
 var
-  LPageIndex: Integer;
+  LPageIndex, LFoundPageIndex: Integer;
   LPreviousPage: Boolean;
 begin
   Result := FSearchIndex;
@@ -1206,6 +1269,7 @@ begin
   Dec(FSearchIndex);
 
   LPreviousPage := False;
+  LFoundPageIndex := -1;
 
   for LPageIndex := FPageCount - 1 downto 0 do
   with FPageInfo[LPageIndex] do
@@ -1213,6 +1277,7 @@ begin
     if LPreviousPage and (Length(SearchRects) > 0) then
     begin
       SearchCurrentIndex := Length(SearchRects) - 1;
+      LFoundPageIndex := LPageIndex;
       Break;
     end
     else
@@ -1221,6 +1286,7 @@ begin
       if SearchCurrentIndex - 1 >= 0 then
       begin
         Dec(SearchCurrentIndex);
+        LFoundPageIndex := LPageIndex;
         Break;
       end
       else
@@ -1231,8 +1297,11 @@ begin
     end;
   end;
 
-  GoToPage(LPageIndex, False);
-  AdjustScrollBar(LPageIndex);
+  if LFoundPageIndex <> -1 then
+  begin
+    GoToPage(LFoundPageIndex, False);
+    AdjustScrollBar(LFoundPageIndex);
+  end;
 
   Result := FSearchIndex;
 
@@ -1303,6 +1372,7 @@ begin
   if FFormFieldFocused and IsCurrentPageValid then
   begin
     LText := CurrentPage.FormGetSelectedText;
+
     if not LText.IsEmpty then
       Clipboard.AsText := LText;
   end;
@@ -1316,16 +1386,22 @@ begin
     CurrentPage.FormReplaceSelection('');
   end;
 end;
+
 procedure TCustomPDFiumControl.PasteFormTextFromClipboard;
 begin
   if FFormFieldFocused and IsCurrentPageValid then
   begin
-    Clipboard.Open;
     try
-      if Clipboard.HasFormat(CF_UNICODETEXT) or Clipboard.HasFormat(CF_TEXT) then
-        CurrentPage.FormReplaceSelection(Clipboard.AsText);
-    finally
-      Clipboard.Close;
+      Clipboard.Open;
+      try
+        if Clipboard.HasFormat(CF_UNICODETEXT) or Clipboard.HasFormat(CF_TEXT) then
+          CurrentPage.FormReplaceSelection(Clipboard.AsText);
+      finally
+        Clipboard.Close;
+      end;
+    except
+      on E: Exception do
+        raise;
     end;
   end;
 end;
@@ -1358,6 +1434,7 @@ begin
   while LPageIndex > 0 do
   begin
     Dec(LPageIndex);
+
     LY := LY + FPageInfo[LPageIndex].Height;
   end;
 
@@ -1378,6 +1455,7 @@ begin
       VertScrollBar.Position := GetPageTop(AIndex);
 
     DoScroll(sbVertical);
+    RefreshScrollBars;
   end;
 end;
 
@@ -1394,7 +1472,7 @@ begin
     FPageInfo[LIndex].Visible := 0;
 
   LClient := ClientRect;
-  LTop := 0;
+  LTop := 0.0;
   LMargin := FPageMargin;
   LScale := FZoomPercent / 100 * Screen.PixelsPerInch / 72;
 
@@ -1458,6 +1536,7 @@ begin
     if Assigned(LPage) then
     begin
       LCount := CurrentPage.GetTextRectCount(SelectionStart, SelectionLength);
+
       SetLength(Result, LCount);
 
       for LIndex := 0 to LCount - 1 do
@@ -1528,9 +1607,11 @@ begin
   Result := False;
 
   LPage := CurrentPage;
+
   if Assigned(LPage) then
   begin
     ClearSelection;
+
     LCharCount := LPage.GetCharCount;
     LCharIndex := ACharIndex;
 
@@ -1556,6 +1637,7 @@ begin
         Inc(LStartCharIndex);
 
         LStopCharIndex := LCharIndex + 1;
+
         while LStopCharIndex < LCharCount do
         begin
           LChar := CurrentPage.ReadChar(LStopCharIndex);
@@ -1583,6 +1665,9 @@ var
 begin
   inherited MouseDown(AButton, AShift, X, Y);
 
+  UpdateHitPageIndex(Point(X, Y));
+  PageIndex := FHitPageIndex;
+
   if AButton = mbLeft then
   begin
     SetFocus;
@@ -1598,6 +1683,7 @@ begin
     if FAllowFormFieldEdit then
     begin
       LPoint := DeviceToPage(X, Y);
+
       if AButton = mbLeft then
       begin
         if LPage.FormEventLButtonDown(AShift, LPoint.X, LPoint.Y) then
@@ -1634,7 +1720,7 @@ function TCustomPDFiumControl.GetPageIndexAt(const APoint: TPoint): Integer;
 var
   LIndex: Integer;
 begin
-  Result := FPageIndex;
+  Result := FHitPageIndex;
 
   if APoint.Y > 5 then
   for LIndex := 0 to FPageCount - 1 do
@@ -1645,7 +1731,7 @@ end;
 procedure TCustomPDFiumControl.MouseMove(AShift: TShiftState; X, Y: Integer);
 var
   LPoint: TPDFPoint;
-  LPage: TPdfPage;
+  LHitPage: TPdfPage;
   LCursor: TCursor;
   LPageIndex: Integer;
   LURL: string;
@@ -1656,20 +1742,17 @@ begin
   if not Assigned(FPDFDocument) or not FPDFDocument.Active then
     Exit;
 
-  LPageIndex := GetPageIndexAt(Point(X, Y));
+  UpdateHitPageIndex(Point(X, Y));
 
-  if LPageIndex <> FPageIndex then
-    PageIndex := LPageIndex;
-
+  LHitPage := GetPage(FHitPageIndex);
   LCursor := Cursor;
   try
-    if FAllowFormFieldEdit and IsCurrentPageValid then
+    if FAllowFormFieldEdit and Assigned(LHitPage) then
     begin
-      LPoint := DeviceToPage(X, Y);
-      LPage := CurrentPage;
+      LPoint := DeviceToPage(X, Y, FHitPageIndex);
 
-      if LPage.FormEventMouseMove(AShift, LPoint.X, LPoint.Y) then
-      case LPage.HasFormFieldAtPoint(LPoint.X, LPoint.Y) of
+      if LHitPage.FormEventMouseMove(AShift, LPoint.X, LPoint.Y) then
+      case LHitPage.HasFormFieldAtPoint(LPoint.X, LPoint.Y) of
         fftTextField:
           LCursor := crIBeam;
         fftComboBox, fftSignature:
@@ -1692,9 +1775,9 @@ begin
           end;
       end
       else
-      if IsCurrentPageValid then
+      if Assigned(LHitPage) then
       begin
-        LPoint := DeviceToPage(X, Y);
+        LPoint := DeviceToPage(X, Y, FHitPageIndex);
 
         if Assigned(FOnClickLink) and IsWebLinkAt(X, Y) then
           LCursor := crHandPoint
@@ -1707,12 +1790,13 @@ begin
             ShowHint(LURL, LRect);
         end
         else
-        if CurrentPage.GetCharIndexAt(LPoint.X, LPoint.Y, 5, 5) >= 0 then
+        if LHitPage.GetCharIndexAt(LPoint.X, LPoint.Y, 5, 5) >= 0 then
           LCursor := crIBeam
         else
         if Cursor <> crDefault then
         begin
           LCursor := crDefault;
+
           HideHint;
         end;
       end;
@@ -1775,13 +1859,18 @@ begin
 end;
 
 function TCustomPDFiumControl.DeviceToPage(const X, Y: Integer): TPDFPoint;
+begin
+  Result := DeviceToPage(X, Y, FPageIndex);
+end;
+
+function TCustomPDFiumControl.DeviceToPage(const X, Y, APageIndex: Integer): TPDFPoint;
 var
   LPage: TPDFPage;
 begin
-  LPage := CurrentPage;
+  LPage := GetPage(APageIndex);
 
   if Assigned(LPage) then
-  with FPageInfo[FPageIndex] do
+  with FPageInfo[APageIndex] do
     Result := LPage.DeviceToPage(Rect.Left, Rect.Top, Rect.Width, Rect.Height, X, Y, Rotation)
   else
     Result := TPDFPoint.Empty;
@@ -1794,7 +1883,7 @@ begin
   if Assigned(FWebLinksInfo) then
     FreeAndNil(FWebLinksInfo);
 
-  LPage := CurrentPage;
+  LPage := GetPage(FHitPageIndex);
 
   if Assigned(LPage) then
     FWebLinksInfo := TPdfPageWebLinksInfo.Create(LPage);
@@ -1806,7 +1895,8 @@ var
 begin
   if Assigned(FWebLinksInfo) then
   begin
-    LPoint := DeviceToPage(X, Y);
+    LPoint := DeviceToPage(X, Y, FHitPageIndex);
+
     Result := FWebLinksInfo.IsWebLinkAt(LPoint.X, LPoint.Y);
   end
   else
@@ -1821,9 +1911,10 @@ var
 begin
   AURL := '';
 
-  if Assigned(CurrentPage) and Assigned(FWebLinksInfo) then
+  if Assigned(GetPage(FHitPageIndex)) and Assigned(FWebLinksInfo) then
   begin
-    LPoint := DeviceToPage(X, Y);
+    LPoint := DeviceToPage(X, Y, FHitPageIndex);
+
     Result := FWebLinksInfo.IsWebLinkAt(LPoint.X, LPoint.Y, AURL);
   end
   else
@@ -1839,7 +1930,7 @@ var
 begin
   Result := False;
 
-  LPage := CurrentPage;
+  LPage := GetPage(FHitPageIndex);
 
   APageIndex := -1;
   AURL := '';
@@ -1847,24 +1938,24 @@ begin
 
   if Assigned(LPage) then
   begin
-    LPoint := DeviceToPage(X, Y);
+    LPoint := DeviceToPage(X, Y, FHitPageIndex);
     LAnnotation := LPage.GetLinkAtPoint(LPoint.X, LPoint.Y);
 
     if Assigned(LAnnotation) then
     begin
       if LAnnotation.LinkType = altGoto then
       begin
-         if LAnnotation.GetLinkGotoDestination(LLinkGotoDestination) then
-         try
-           APageIndex := LLinkGotoDestination.PageIndex;
-         finally
-           LLinkGotoDestination.Free;
-         end;
+        if LAnnotation.GetLinkGotoDestination(LLinkGotoDestination) then
+        try
+          APageIndex := LLinkGotoDestination.PageIndex;
+        finally
+          LLinkGotoDestination.Free;
+        end;
       end
       else
         AURL := LAnnotation.LinkUri;
 
-      ALinkRect := InternPageToDevice(LPage, LAnnotation.AnnotationRect, FPageInfo[FPageIndex].Rect);
+      ALinkRect := InternPageToDevice(LPage, LAnnotation.AnnotationRect, FPageInfo[FHitPageIndex].Rect);
     end
     else
       Exit;
@@ -1884,6 +1975,7 @@ begin
   LHintWindow := GetHintWindow;
   LRect := LHintWindow.CalcHintRect(200, AHint, nil);
   LPoint := ClientToScreen(Point(ARect.Left, ARect.Bottom));
+
   OffsetRect(LRect, LPoint.X, LPoint.Y);
   LHintWindow.ActivateHint(LRect, AHint);
   LHintWindow.Update;
@@ -1928,14 +2020,11 @@ begin
 end;
 
 function TCustomPDFiumControl.PageWidthZoomPercent: Single;
-var
-  LScale: Single;
 begin
   if not IsPageIndexValid(FPageIndex) then
     Exit(100);
 
-  LScale := 72 / Screen.PixelsPerInch;
-  Result := 100 * (ClientWidth - 2 * FPageMargin) * LScale / Max(FWidth, 1);
+  Result := 100 * (ClientWidth - 2 * FPageMargin) * (72 / Screen.PixelsPerInch) / Max(FWidth, 1);
 end;
 
 function TCustomPDFiumControl.SetSelStopCharIndex(const X, Y: Integer): Boolean;
@@ -1956,11 +2045,12 @@ begin
   if not Result then
     LCharIndex := FSelectionStopCharIndex;
 
-  if FSelectionStartCharIndex <> LCharIndex then
-    LActive := True
-  else
+  LActive := True;
+
+  if FSelectionStartCharIndex = LCharIndex then
   begin
     LRect := InternPageToDevice(CurrentPage, CurrentPage.GetCharBox(FSelectionStartCharIndex), FPageInfo[FPageIndex].Rect);
+
     LActive := PtInRect(LRect, FMouseDownPoint) xor PtInRect(LRect, Point(X, Y));
   end;
 
@@ -1983,7 +2073,7 @@ var
   LPage: TPDFPage;
   LBrush: HBrush;
 begin
-  LBrush := CreateSolidBrush(Color);
+  LBrush := CreateSolidBrush(ColorToRGB(Color));
   try
     FillRect(ADC, ClientRect, LBrush);
 
@@ -2005,15 +2095,20 @@ begin
       FillRect(ADC, Rect, LBrush);
       PaintPage(ADC, LPage, LIndex);
 
-      { Selections are drawn only to selected page without rotation. }
-      if (LIndex = FPageIndex) and (Rotation = prNormal) then
+      { Selections are drawn only to the selected page. Selections and search results are drawn only without
+        rotation, because InternPageToDevice does not handle the user rotated page. }
+      if Rotation = prNormal then
       begin
-        if FSelectionActive then
-          PaintPageSelection(ADC, LPage, LIndex);
-        PaintAlphaSelection(ADC, LPage, FFormOutputSelectedRects, LIndex);
-      end;
+        if LIndex = FPageIndex then
+        begin
+          if FSelectionActive then
+            PaintPageSelection(ADC, LPage, LIndex);
 
-      PaintPageSearchResults(ADC, LPage, LIndex);
+          PaintAlphaSelection(ADC, LPage, FFormOutputSelectedRects, LIndex);
+        end;
+
+        PaintPageSearchResults(ADC, LPage, LIndex);
+      end;
 
 {$IFDEF ALPHASKINS}
       if IsLightStyleColor(Color) then
@@ -2032,8 +2127,14 @@ procedure TCustomPDFiumControl.PaintPage(ADC: HDC; const APage: TPDFPage; const 
 var
   LRect: TRect;
   LPoint: TPoint;
+  LBitmap: TBitmap;
 begin
+  LBitmap := GetPageCacheBitmap(APage, AIndex);
+
   with FPageInfo[AIndex] do
+  if Assigned(LBitmap) then
+    BitBlt(ADC, Rect.Left, Rect.Top, Rect.Width, Rect.Height, LBitmap.Canvas.Handle, 0, 0, SRCCOPY)
+  else
   if (Rect.Left <> 0) or (Rect.Top <> 0) then
   begin
     LRect := TRect.Create(0, 0, Rect.Width, Rect.Height);
@@ -2043,6 +2144,86 @@ begin
   end
   else
     FPDF_RenderPage(ADC, APage.Handle, Rect.Left, Rect.Top, Rect.Width, Rect.Height, Ord(Rotation), 0);
+end;
+
+function TCustomPDFiumControl.GetPageCacheBitmap(const APage: TPDFPage; const AIndex: Integer): TBitmap;
+var
+  LHeight, LWidth: Integer;
+  LEntry: TPDFPageBitmapCacheEntry;
+  LIndex, LOldest: Integer;
+  LItem: TPDFPageBitmapCacheEntry;
+begin
+  Result := nil;
+
+  if not FPageCacheEnabled then
+  begin
+    if FPageCache.Count > 0 then
+      ClearPageCache;
+
+    Exit;
+  end;
+
+  LWidth := FPageInfo[AIndex].Rect.Width;
+  LHeight := FPageInfo[AIndex].Rect.Height;
+
+  if (LWidth <= 0) or (LHeight <= 0) or (Int64(LWidth) * LHeight > CMaxCachedPagePixels) then
+    Exit;
+
+  Inc(FPageCacheCounter);
+
+  LEntry := nil;
+
+  for LItem in FPageCache do
+  if LItem.PageIndex = AIndex then
+  begin
+    LEntry := LItem;
+    Break;
+  end;
+
+  if Assigned(LEntry) then
+  begin
+    if (LEntry.Bitmap.Width = LWidth) and (LEntry.Bitmap.Height = LHeight) and
+      (LEntry.Rotation = FPageInfo[AIndex].Rotation) and (LEntry.ZoomPercent = FZoomPercent) then
+    begin
+      LEntry.LastUsed := FPageCacheCounter;
+      Exit(LEntry.Bitmap);
+    end;
+  end
+  else
+  begin
+    if FPageCache.Count >= CMaxCachedPages then
+    begin
+      LOldest := 0;
+
+      for LIndex := 1 to FPageCache.Count - 1 do
+      if FPageCache[LIndex].LastUsed < FPageCache[LOldest].LastUsed then
+        LOldest := LIndex;
+
+      FPageCache.Delete(LOldest);
+    end;
+
+    LEntry := TPDFPageBitmapCacheEntry.Create;
+    FPageCache.Add(LEntry);
+  end;
+
+  LEntry.PageIndex := AIndex;
+  LEntry.Rotation := FPageInfo[AIndex].Rotation;
+  LEntry.ZoomPercent := FZoomPercent;
+  LEntry.LastUsed := FPageCacheCounter;
+
+  LEntry.Bitmap.PixelFormat := pf32bit;
+  LEntry.Bitmap.SetSize(LWidth, LHeight);
+  LEntry.Bitmap.Canvas.Brush.Color := TColors.White;
+  LEntry.Bitmap.Canvas.FillRect(TRect.Create(0, 0, LWidth, LHeight));
+
+  APage.Draw(LEntry.Bitmap.Canvas.Handle, 0, 0, LWidth, LHeight, FPageInfo[AIndex].Rotation, FDrawOptions);
+
+  Result := LEntry.Bitmap;
+end;
+
+procedure TCustomPDFiumControl.ClearPageCache;
+begin
+  FPageCache.Clear;
 end;
 
 procedure TCustomPDFiumControl.PaintPageSelection(ADC: HDC; const APage: TPDFPage; const AIndex: Integer);
@@ -2071,6 +2252,7 @@ begin
   if FPDFDocument.Active and (AIndex < FPDFDocument.PageCount) then
   begin
     LPage := FPDFDocument.Pages[AIndex];
+
     LPage.Draw(ADC, ARect.Left, ARect.Top, ARect.Width, ARect.Height, FPageInfo[AIndex].Rotation, FDrawOptions);
   end;
 end;
@@ -2078,7 +2260,7 @@ end;
 procedure TCustomPDFiumControl.PaintPageSearchResults(ADC: HDC; const APage: TPDFPage; const AIndex: Integer);
 begin
   if Length(FPageInfo[AIndex].SearchRects) > 0 then
-    PaintAlphaSelection(ADC, APage, FPageInfo[AIndex].SearchRects, AIndex, RGB(204, 224, 204));
+    PaintAlphaSelection(ADC, APage, FPageInfo[AIndex].SearchRects, AIndex, RGB(255, 255, 0));
 end;
 
 function TCustomPDFiumControl.InternPageToDevice(const APage: TPDFPage; const APageRect: TPDFRect; const ARect: TRect): TRect;
@@ -2109,7 +2291,7 @@ var
       LColor := RGB(204, 204, 255)
     else
     if FPageInfo[AIndex].SearchCurrentIndex = LIndex then
-      LColor := RGB(240, 204, 238)
+      LColor := RGB(255, 128, 0)
     else
     if not FSearchHighlightAll then
       Result := False;
@@ -2129,6 +2311,7 @@ begin
   begin
     LBitmap := TBitmap.Create;
     try
+      LDC := LBitmap.Canvas.Handle;
       LSearchColors := AColor <> TColors.SysNone;
 
       LBlendFunction.BlendOp := AC_SRC_OVER;
@@ -2160,7 +2343,6 @@ begin
   LPen := CreatePen(PS_SOLID, 1, FPageBorderColor);
   LOldPen := SelectObject(ADC, LPen);
   try
-    SelectObject(ADC, LPen);
     MoveToEx(ADC, ARect.Left, ARect.Top, nil);
     LineTo(ADC, ARect.Left + ARect.Width - 1, ARect.Top);
     LineTo(ADC, ARect.Left + ARect.Width - 1, ARect.Top + ARect.Height - 1);
@@ -2206,7 +2388,7 @@ begin
   Result := SelectionLength <> 0;
 end;
 
-procedure TCustomPDFiumControl.RotatePageClockwise;
+procedure TCustomPDFiumControl.RotatePage(const AClockwise: Boolean = True);
 var
   LPage: TPDFPage;
 begin
@@ -2217,10 +2399,20 @@ begin
 
   with FPageInfo[FPageIndex] do
   begin
-    Inc(Rotation);
+    if AClockwise then
+    begin
+      Inc(Rotation);
 
-    if Ord(Rotation) > Ord(pr90CounterClockwide) then
-      Rotation := prNormal;
+      if Ord(Rotation) > Ord(pr90CounterClockwide) then // TODO: Typo (Clockwide => Clockwise) in Andy's PdfiumCore.TPdfPageRotation
+        Rotation := prNormal;
+    end
+    else
+    begin
+      Dec(Rotation);
+
+      if Ord(Rotation) < Ord(prNormal) then
+        Rotation := pr90CounterClockwide;
+    end;
 
     if Rotation in [prNormal, pr180] then
     begin
@@ -2237,35 +2429,14 @@ begin
   DoSizeChanged;
 end;
 
-procedure TCustomPDFiumControl.RotatePageCounterClockwise;
-var
-  LPage: TPDFPage;
+procedure TCustomPDFiumControl.RotatePageClockwise;
 begin
-  if FPageIndex = -1 then
-    Exit;
+  RotatePage;
+end;
 
-  LPage := FPDFDocument.Pages[FPageIndex];
-
-  with FPageInfo[FPageIndex] do
-  begin
-    Dec(Rotation);
-
-    if Ord(Rotation) < Ord(prNormal) then
-      Rotation := pr90CounterClockwide;
-
-    if Rotation in [prNormal, pr180] then
-    begin
-      Height := LPage.Height;
-      Width := LPage.Width;
-    end
-    else
-    begin
-      Height := LPage.Width;
-      Width := LPage.Height;
-    end;
-  end;
-
-  DoSizeChanged;
+procedure TCustomPDFiumControl.RotatePageCounterClockwise;
+begin
+  RotatePage(False);
 end;
 
 procedure TCustomPDFiumControl.ZoomToHeight;
@@ -2291,7 +2462,7 @@ end;
 
 procedure TCustomPDFiumControl.FormGetCurrentPage(ADocument: TPDFDocument; var APage: TPDFPage);
 begin
-  APage := CurrentPage;
+  APage := GetPage(FHitPageIndex);
 end;
 
 procedure TCustomPDFiumControl.FormInvalidate(ADocument: TPdfDocument; APage: TPdfPage; const APageRect: TPdfRect);
@@ -2300,9 +2471,12 @@ var
 begin
   FFormOutputSelectedRects := nil;
 
+  FPageCacheEnabled := False;
+
   if HandleAllocated then
   begin
     LRect := InternPageToDevice(APage, APageRect, FPageInfo[FPageIndex].Rect);
+
     InvalidateRect(Handle, @LRect, True);
   end;
 end;
@@ -2378,6 +2552,11 @@ begin
       if Assigned(OnScroll) then
         OnScroll(Self, sbVertical);
   end;
+
+  case Key of
+    VK_RIGHT, VK_LEFT, VK_UP, VK_DOWN, VK_PRIOR, VK_NEXT, VK_HOME, VK_END:
+      RefreshScrollBars;
+  end;
 end;
 
 { TCustomPDFiumControlThumbnails }
@@ -2427,10 +2606,10 @@ procedure TCustomPDFiumControlThumbnails.AfterConstruction;
 begin
   inherited AfterConstruction;
 
+  FSkinData.Loaded(False);
+
   if HandleAllocated then
     RefreshEditScrolls(SkinData, FScrollWnd);
-
-  UpdateData(FSkinData);
 end;
 
 procedure TCustomPDFiumControlThumbnails.Loaded;
@@ -2538,7 +2717,10 @@ procedure TCustomPDFiumControlThumbnails.DrawCell(ACol, ARow: Longint; ARect: TR
 var
   LRect: TRect;
 begin
-  if not Assigned(PDFiumControl) or (gdSelected in AState) and (ARow <> PDFiumControl.PageIndex) then
+  if not Assigned(PDFiumControl) then
+    Exit;
+
+  if (gdSelected in AState) and (ARow <> PDFiumControl.PageIndex) then
     Exit;
 
   RowCount := PDFiumControl.PageCount;
@@ -2587,6 +2769,7 @@ begin
   Canvas.FillRect(ARect);
 
   LRect := ARect;
+
   InflateRect(LRect, -9, -9);
   Inc(LRect.Left, 8);
 
@@ -2669,9 +2852,10 @@ end;
 
 procedure TCustomPDFiumControlThumbnails.DoPDFiumControlPageChanged(Sender: TObject);
 begin
-  if Visible then
+  if Visible and (PDFiumControl.PageIndex >= 0) and (PDFiumControl.PageIndex < RowCount) then
   begin
     Row := PDFiumControl.PageIndex;
+
     Invalidate;
   end;
 end;
@@ -2686,7 +2870,7 @@ begin
   FPDFiumControl := AValue;
 
   if Assigned(FPDFiumControl) then
-	begin
+  begin
     FPDFiumControl.OnPageChanged := DoPDFiumControlPageChanged;
     FPDFiumControl.OnAfterLoad := DoPDFiumControlAfterLoad;
   end;
@@ -2770,9 +2954,8 @@ begin
   Result := Printer.Handle;
 end;
 
-class function TPDFDocumentVclPrinter.PrintDocument(const ADocument: TPDFDocument;
-  const AJobTitle: string; const AShowPrintDialog: Boolean = True; const AAllowPageRange: Boolean = True;
-  const AParentWnd: HWND = 0): Boolean;
+class function TPDFDocumentVclPrinter.PrintDocument(const ADocument: TPDFDocument; const AJobTitle: string;
+  const AShowPrintDialog: Boolean = True; const AAllowPageRange: Boolean = True; const AParentWnd: HWND = 0): Boolean;
 var
   LPDFDocumentVclPrinter: TPDFDocumentVclPrinter;
   LPrintDialog: TPrintDialog;
@@ -2842,5 +3025,14 @@ begin
     LPDFDocumentVclPrinter.Free;
   end;
 end;
+
+initialization
+
+  TCustomStyleEngine.RegisterStyleHook(TPDFiumControl, TScrollingStyleHook);
+
+finalization
+
+  TCustomStyleEngine.UnRegisterStyleHook(TPDFiumControl, TScrollingStyleHook);
+
 
 end.
