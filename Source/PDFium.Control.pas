@@ -905,9 +905,11 @@ begin
   FPageCount := AValue;
   FPageIndex := 0;
   FHitPageIndex := 0;
-  FreeAndNil(FWebLinksInfo);
   FWidth := 0;
   FHeight := 0;
+
+  if Assigned(FWebLinksInfo) then
+    FreeAndNil(FWebLinksInfo);
 
   if FPageCount > 0 then
   begin
