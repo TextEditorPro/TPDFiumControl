@@ -1,8 +1,6 @@
 # TPDFiumControl
 
-Legacy version of the page scrolling PDF control for Delphi.
-
-Latest version for Delphi 13+ https://codeberg.org/TextEditorPro/TPDFiumControl 
+The latest version of the page scrolling PDF control for Delphi.
 
 ## Requires 
 
