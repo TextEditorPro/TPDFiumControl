@@ -1,5 +1,71 @@
 ﻿unit PDFium.Control;
 
+{ Enables TCustomPDFiumControl.LoadFromURL, which downloads a PDF document over HTTP/HTTPS (TLS 1.1-1.3, redirects
+  followed, 60 second timeouts) and opens it. Disabled by default so that the unit does not pull in the
+  System.Net.HttpClient units when the feature is not needed. }
+{.$DEFINE USE_LOAD_FROM_URL}
+
+{ Enables per page printer orientation switching in TPDFDocumentVclPrinter, so that a document containing both
+  portrait and landscape pages is printed with the correct orientation for every page, instead of rotating the
+  pages into the single orientation selected before BeginDoc.
+
+  Note! This requires a fix in PdfiumCore.pas (TPdfDocumentPrinter) that has not been reported to the PdfiumLib
+  developer yet, so the define must stay disabled until the fix is in. The required fix:
+
+  1. Add a new virtual method to the protected section of TPdfDocumentPrinter, after GetPrinterDC:
+
+       // Called before PrinterStartPage when the orientation of the next page differs from the printer's current
+       // orientation. A descendant that can switch the orientation of the running print job does so and returns
+       // True; the printer DC and the printer bounds are then re-read. Returning False keeps the old behaviour
+       // (the print area is rotated by swapping its width and height).
+       function PrinterSetOrientation(const APortrait: Boolean): Boolean; virtual;
+
+     with a default implementation that just returns False.
+
+  2. In TPdfDocumentPrinter.Print(ADocument, AFromPageIndex, AToPageIndex), inside the page loop, right after
+     PagePortraitOrientation has been calculated and before the FitPageToPrintArea block and the PrinterStartPage
+     call, add:
+
+       if (PagePortraitOrientation <> FPrintPortraitOrientation) and PrinterSetOrientation(PagePortraitOrientation) then
+       begin
+         FPrinterDC := GetPrinterDC;
+         GetPrinterBounds;
+         FPrintPortraitOrientation := IsPortraitOrientation(FPaperSize.cx, FPaperSize.cy);
+       end; }
+{.$DEFINE PDFIUMCORE_PRINTER_ORIENTATION_FIX}
+
+{ Enables printing of multiple copies, with or without collation, in TPDFDocumentVclPrinter.PrintDocument. The
+  copies are produced by the print loop itself and the printer driver's copy count is forced to 1, so collation
+  also works on printers whose driver cannot collate.
+
+  Note! This requires a fix in PdfiumCore.pas (TPdfDocumentPrinter) that has not been reported to the PdfiumLib
+  developer yet, so the define must stay disabled until the fix is in. The required fix:
+
+  1. Change the page range overload of Print to
+
+       function Print(ADocument: TPdfDocument; AFromPageIndex, AToPageIndex: Integer; const ACopies: Integer;
+         const ACollate: Boolean): Boolean; overload;
+
+     and let the print all overload Print(ADocument) call it with ACopies = 1 and ACollate = False.
+
+  2. In the implementation of the page range overload, wrap the body of the page loop (everything inside
+     "for PageIndex := AFromPageIndex to AToPageIndex do") into a local procedure, for example PrintPage, declare
+     a new local variable "CopyIndex: Integer", and replace the loop with:
+
+       if ACollate then
+       begin
+         for CopyIndex := 1 to ACopies do
+           for PageIndex := AFromPageIndex to AToPageIndex do
+             PrintPage;
+       end
+       else
+       begin
+         for PageIndex := AFromPageIndex to AToPageIndex do
+           for CopyIndex := 1 to ACopies do
+             PrintPage;
+       end; }
+{.$DEFINE PDFIUMCORE_PRINTER_COPIES_COLLATE_FIX}
+
 interface
 
 uses
@@ -329,9 +395,18 @@ type
   TPDFDocumentVclPrinter = class(TPDFDocumentPrinter)
   private
     FBeginDocCalled: Boolean;
+{$IFDEF PDFIUMCORE_PRINTER_ORIENTATION_FIX}
+    FPageClosed: Boolean;
+{$ENDIF}
     FPagePrinted: Boolean;
+{$IFDEF PDFIUMCORE_PRINTER_ORIENTATION_FIX}
+    FPortrait: Boolean;
+{$ENDIF}
   protected
     function GetPrinterDC: HDC; override;
+{$IFDEF PDFIUMCORE_PRINTER_ORIENTATION_FIX}
+    function PrinterSetOrientation(const APortrait: Boolean): Boolean; override;
+{$ENDIF}
     function PrinterStartDoc(const AJobTitle: string): Boolean; override;
     procedure PrinterEndDoc; override;
     procedure PrinterEndPage; override;
@@ -346,11 +421,11 @@ implementation
 
 uses
   System.Character, System.Generics.Defaults, System.Types, Vcl.Clipbrd, Vcl.Printers, Vcl.Themes
-{$IFDEF ALPHASKINS}
-  , sConst, sDialogs, sSkinManager, sMessages, sStyleSimply, sVCLUtils
-{$ENDIF}
 {$IFDEF USE_LOAD_FROM_URL}
   , System.Net.HttpClientComponent, System.Net.HttpClient
+{$ENDIF}
+{$IFDEF ALPHASKINS}
+  , sConst, sDialogs, sSkinManager, sMessages, sStyleSimply, sVCLUtils
 {$ENDIF};
 
 const
@@ -629,6 +704,8 @@ begin
     FOnScroll(Self, AScrollBarKind);
 end;
 
+{ A styled scroll bar (for example TScrollingStyleHook) is not repainted when the position is changed from code.
+  Sending WM_NCPAINT makes the style hook repaint the scroll bars. }
 procedure TCustomPDFiumControl.RefreshScrollBars;
 begin
   if HandleAllocated then
@@ -728,6 +805,8 @@ begin
   inherited;
 end;
 
+{ Tracks the page under the mouse for hit testing. Does not change the current page - hovering must not move
+  the thumbnail selection or fire OnPageChanged. }
 procedure TCustomPDFiumControl.UpdateHitPageIndex(const APoint: TPoint);
 var
   LPageIndex: Integer;
@@ -743,9 +822,9 @@ end;
 
 procedure TCustomPDFiumControl.UpdatePageIndex;
 var
-  LIndex: Integer;
-  LPageIndex: Integer;
   LTop: Integer;
+  LPageIndex: Integer;
+  LIndex: Integer;
 begin
   LTop := Height div 3;
   LPageIndex := FPageCount - 1;
@@ -793,7 +872,7 @@ begin
 end;
 
 procedure TCustomPDFiumControl.LoadDocument(const ALoadProc: TProc<UTF8String>);
-var 
+var
   LPassword: UTF8String;
 begin
   try
@@ -840,8 +919,8 @@ end;
 
 procedure TCustomPDFiumControl.LoadFromURL(const AURL: string);
 var
-  LStream: TMemoryStream;
   LHTTPClient: TNetHTTPClient;
+  LStream: TMemoryStream;
 begin
   LHTTPClient := CreateNetHTTPClient;
   try
@@ -896,8 +975,8 @@ end;
 
 procedure TCustomPDFiumControl.SetPageCount(const AValue: Integer);
 var
-  LIndex: Integer;
   LPage: TPDFPage;
+  LIndex: Integer;
 begin
   ClearPageCache;
   FPageCacheEnabled := True;
@@ -993,9 +1072,8 @@ type
   end;
 
 var
+  LHorzScrollInfo, LVertScrollInfo: TScrollInfo;
   LZoom: Single;
-  LHorzScrollInfo: TScrollInfo;
-  LVertScrollInfo: TScrollInfo;
 begin
   SetScrollInfo(LHorzScrollInfo, HorzScrollBar);
   SetScrollInfo(LVertScrollInfo, VertScrollBar);
@@ -1086,8 +1164,8 @@ end;
 
 procedure TCustomPDFiumControl.AdjustScrollBar(const APageIndex: Integer);
 var
-  LRect: TRect;
   LPageRect: TRect;
+  LRect: TRect;
 begin
   with FPageInfo[APageIndex] do
   begin
@@ -1104,12 +1182,13 @@ end;
 function TCustomPDFiumControl.SearchAll(const ASearchText: string; const AHighlightAll: Boolean; const AMatchCase: Boolean;
   const AWholeWords: Boolean; const AScrollIntoView: Boolean = True; const APageIndex: Integer = -1): Integer;
 var
-  LCount, LRectCount: Integer;
-  LCharIndex, LCharCount: Integer;
-  LIndex, LPageIndex: Integer;
+  LFromPage: Integer;
+  LToPage: Integer;
   LPage: TPDFPage;
   LSearchText: string;
-  LFromPage, LToPage: Integer;
+  LCount, LRectCount, LCharIndex, LCharCount: Integer;
+  LPageIndex: Integer;
+  LIndex: Integer;
 begin
   Result := 0;
 
@@ -1208,8 +1287,9 @@ end;
 
 function TCustomPDFiumControl.FindNext: Integer;
 var
-  LPageIndex, LFoundPageIndex: Integer;
   LNextPage: Boolean;
+  LFoundPageIndex: Integer;
+  LPageIndex: Integer;
 begin
   Result := FSearchIndex;
 
@@ -1260,8 +1340,9 @@ end;
 
 function TCustomPDFiumControl.FindPrevious: Integer;
 var
-  LPageIndex, LFoundPageIndex: Integer;
   LPreviousPage: Boolean;
+  LFoundPageIndex: Integer;
+  LPageIndex: Integer;
 begin
   Result := FSearchIndex;
 
@@ -1425,8 +1506,8 @@ end;
 
 function TCustomPDFiumControl.GetPageTop(const APageIndex: Integer): Integer;
 var
-  LY: Double;
   LPageIndex: Integer;
+  LY: Double;
 begin
   LPageIndex := APageIndex;
   LY := 0;
@@ -1464,17 +1545,17 @@ end;
 procedure TCustomPDFiumControl.AdjustPageInfo;
 var
   LIndex: Integer;
-  LTop: Double;
-  LScale: Double;
   LClient: TRect;
-  LRect: TRect;
+  LTop: Double;
   LMargin: Integer;
+  LScale: Double;
+  LRect: TRect;
 begin
   for LIndex := 0 to FPageCount - 1 do
     FPageInfo[LIndex].Visible := 0;
 
   LClient := ClientRect;
-  LTop := 0.0;
+  LTop := 0;
   LMargin := FPageMargin;
   LScale := FZoomPercent / 100 * Screen.PixelsPerInch / 72;
 
@@ -1527,9 +1608,9 @@ end;
 
 function TCustomPDFiumControl.GetSelectionRects: TPDFControlRectArray;
 var
+  LPage: TPDFPage;
   LCount: Integer;
   LIndex: Integer;
-  LPage: TPDFPage;
 begin
   if FSelectionActive and HandleAllocated then
   begin
@@ -1583,7 +1664,8 @@ end;
 
 procedure TCustomPDFiumControl.SetSelection(const AActive: Boolean; const AStartIndex, AStopIndex: Integer);
 var
-  LOldRects, LNewRects: TPDFControlRectArray;
+  LOldRects: TPDFControlRectArray;
+  LNewRects: TPDFControlRectArray;
 begin
   if (AActive <> FSelectionActive) or (AStartIndex <> FSelectionStartCharIndex) or (AStopIndex <> FSelectionStopCharIndex) then
   begin
@@ -1601,10 +1683,12 @@ end;
 
 function TCustomPDFiumControl.SelectWord(const ACharIndex: Integer): Boolean;
 var
-  LChar: Char;
-  LStartCharIndex, LStopCharIndex, LCharCount: Integer;
   LPage: TPDFPage;
+  LCharCount: Integer;
   LCharIndex: Integer;
+  LStartCharIndex: Integer;
+  LStopCharIndex: Integer;
+  LChar: Char;
 begin
   Result := False;
 
@@ -1661,12 +1745,13 @@ end;
 
 procedure TCustomPDFiumControl.MouseDown(AButton: TMouseButton; AShift: TShiftState; X, Y: Integer);
 var
+  LPage: TPDFPage;
   LPoint: TPDFPoint;
   LCharIndex: Integer;
-  LPage: TPdfPage;
 begin
   inherited MouseDown(AButton, AShift, X, Y);
 
+  { A click makes the clicked page the current page. Hovering only moves FHitPageIndex - see MouseMove. }
   UpdateHitPageIndex(Point(X, Y));
   PageIndex := FHitPageIndex;
 
@@ -1732,12 +1817,12 @@ end;
 
 procedure TCustomPDFiumControl.MouseMove(AShift: TShiftState; X, Y: Integer);
 var
-  LPoint: TPDFPoint;
-  LHitPage: TPdfPage;
+  LHitPage: TPDFPage;
   LCursor: TCursor;
-  LPageIndex: Integer;
+  LPoint: TPDFPoint;
   LURL: string;
   LRect: TRect;
+  LPageIndex: Integer;
 begin
   inherited MouseMove(AShift, X, Y);
 
@@ -1811,8 +1896,8 @@ end;
 
 procedure TCustomPDFiumControl.MouseUp(AButton: TMouseButton; AShift: TShiftState; X, Y: Integer);
 var
-  LPage: TPdfPage;
   LPoint: TPDFPoint;
+  LPage: TPDFPage;
   LURL: string;
   LRect: TRect;
   LPageIndex: Integer;
@@ -1893,7 +1978,7 @@ end;
 
 function TCustomPDFiumControl.IsWebLinkAt(const X, Y: Integer): Boolean;
 var
-  LPoint: TPdfPoint;
+  LPoint: TPDFPoint;
 begin
   if Assigned(FWebLinksInfo) then
   begin
@@ -1926,7 +2011,7 @@ end;
 function TCustomPDFiumControl.IsAnnotationLinkAt(const X, Y: Integer; out AURL: string; out APageIndex: Integer; out ALinkRect: TRect): Boolean;
 var
   LPage: TPDFPage;
-  LPoint: TPdfPoint;
+  LPoint: TPDFPoint;
   LAnnotation: TPdfAnnotation;
   LLinkGotoDestination: TPdfLinkGotoDestination;
 begin
@@ -2006,7 +2091,8 @@ end;
 function TCustomPDFiumControl.PageHeightZoomPercent: Single;
 var
   LScale: Single;
-  LZoom1, LZoom2: Single;
+  LZoom1: Single;
+  LZoom2: Single;
 begin
   if not IsPageIndexValid(FPageIndex) then
     Exit(100);
@@ -2071,9 +2157,9 @@ end;
 
 procedure TCustomPDFiumControl.PaintWindow(ADC: HDC);
 var
-  LIndex: Integer;
-  LPage: TPDFPage;
   LBrush: HBrush;
+  LPage: TPDFPage;
+  LIndex: Integer;
 begin
   LBrush := CreateSolidBrush(ColorToRGB(Color));
   try
@@ -2127,9 +2213,9 @@ end;
 
 procedure TCustomPDFiumControl.PaintPage(ADC: HDC; const APage: TPDFPage; const AIndex: Integer);
 var
+  LBitmap: TBitmap;
   LRect: TRect;
   LPoint: TPoint;
-  LBitmap: TBitmap;
 begin
   LBitmap := GetPageCacheBitmap(APage, AIndex);
 
@@ -2140,6 +2226,7 @@ begin
   if (Rect.Left <> 0) or (Rect.Top <> 0) then
   begin
     LRect := TRect.Create(0, 0, Rect.Width, Rect.Height);
+
     SetViewportOrgEx(ADC, Rect.Left, Rect.Top, @LPoint);
     APage.Draw(ADC, LRect.Left, LRect.Top, LRect.Width, LRect.Height, Rotation, FDrawOptions);
     SetViewportOrgEx(ADC, LPoint.X, LPoint.Y, nil);
@@ -2150,13 +2237,17 @@ end;
 
 function TCustomPDFiumControl.GetPageCacheBitmap(const APage: TPDFPage; const AIndex: Integer): TBitmap;
 var
-  LHeight, LWidth: Integer;
+  LWidth: Integer;
+  LHeight: Integer;
   LEntry: TPDFPageBitmapCacheEntry;
-  LIndex, LOldest: Integer;
   LItem: TPDFPageBitmapCacheEntry;
+  LOldest: Integer;
+  LIndex: Integer;
 begin
   Result := nil;
 
+  { Form field documents invalidate constantly (hover highlight, caret blink, even during drawing), so a cached
+    full page rendering would be slower than the direct clipped drawing. }
   if not FPageCacheEnabled then
   begin
     if FPageCache.Count > 0 then
@@ -2231,8 +2322,8 @@ end;
 procedure TCustomPDFiumControl.PaintPageSelection(ADC: HDC; const APage: TPDFPage; const AIndex: Integer);
 var
   LCount: Integer;
-  LIndex: Integer;
   LRects: TPDFControlPDFRectArray;
+  LIndex: Integer;
 begin
   LCount := APage.GetTextRectCount(SelectionStart, SelectionLength);
 
@@ -2273,13 +2364,13 @@ end;
 procedure TCustomPDFiumControl.PaintAlphaSelection(ADC: HDC; const APage: TPDFPage; const ARects: TPDFControlPDFRectArray;
   const AIndex: Integer; const AColor: TColor = TColors.SysNone);
 var
-  LCount: Integer;
   LIndex: Integer;
-  LRect: TRect;
   LDC: HDC;
   LBitmap: TBitmap;
-  LBlendFunction: TBlendFunction;
   LSearchColors: Boolean;
+  LCount: Integer;
+  LBlendFunction: TBlendFunction;
+  LRect: TRect;
 
   function SetBrushColor: Boolean;
   var
@@ -2340,7 +2431,8 @@ end;
 
 procedure TCustomPDFiumControl.PaintPageBorder(ADC: HDC; const ARect: TRect);
 var
-  LPen, LOldPen: HPen;
+  LPen: HPen;
+  LOldPen: HGDIOBJ;
 begin
   LPen := CreatePen(PS_SOLID, 1, FPageBorderColor);
   LOldPen := SelectObject(ADC, LPen);
@@ -2464,6 +2556,7 @@ end;
 
 procedure TCustomPDFiumControl.FormGetCurrentPage(ADocument: TPDFDocument; var APage: TPDFPage);
 begin
+  { Mouse driven form events happen on the page under the mouse. }
   APage := GetPage(FHitPageIndex);
 end;
 
@@ -2473,6 +2566,8 @@ var
 begin
   FFormOutputSelectedRects := nil;
 
+  { Only the flag is set here. The cache can not be modified because this event can fire in the middle of a page
+    rendering into a cache bitmap. The cache is released on the next paint. }
   FPageCacheEnabled := False;
 
   if HandleAllocated then
@@ -2916,6 +3011,9 @@ function TPDFDocumentVclPrinter.PrinterStartDoc(const AJobTitle: string): Boolea
 begin
   Result := False;
 
+{$IFDEF PDFIUMCORE_PRINTER_ORIENTATION_FIX}
+  FPageClosed := False;
+{$ENDIF}
   FPagePrinted := False;
 
   if not Printer.Printing then
@@ -2929,8 +3027,74 @@ begin
   end;
 
   if Result then
+{$IFDEF PDFIUMCORE_PRINTER_ORIENTATION_FIX}
+  begin
+    FPortrait := Printer.Orientation = poPortrait;
     SetAbortProc(GetPrinterDC, @FastVclAbortProc);
+  end;
+{$ELSE}
+    SetAbortProc(GetPrinterDC, @FastVclAbortProc);
+{$ENDIF}
 end;
+
+{$IFDEF PDFIUMCORE_PRINTER_ORIENTATION_FIX}
+function TPDFDocumentVclPrinter.PrinterSetOrientation(const APortrait: Boolean): Boolean;
+var
+  LDevice, LDriver, LPort: string;
+  LDeviceModeHandle: THandle;
+  LDeviceMode: PDeviceMode;
+  LPrinterDC: HDC;
+begin
+  Result := False;
+
+  if APortrait = FPortrait then
+    Exit;
+
+  if not (Printer.Printing and FBeginDocCalled) then
+    Exit;
+
+  LPrinterDC := GetPrinterDC;
+
+  if LPrinterDC = 0 then
+    Exit;
+
+  LDeviceModeHandle := 0;
+  Printer.GetPrinter(LDevice, LDriver, LPort, LDeviceModeHandle);
+
+  if LDeviceModeHandle = 0 then
+    Exit;
+
+  LDeviceMode := GlobalLock(LDeviceModeHandle);
+
+  if LDeviceMode = nil then
+    Exit;
+
+  try
+    LDeviceMode^.dmFields := LDeviceMode^.dmFields or DM_ORIENTATION;
+
+    if APortrait then
+      LDeviceMode^.dmOrientation := DMORIENT_PORTRAIT
+    else
+      LDeviceMode^.dmOrientation := DMORIENT_LANDSCAPE;
+
+    { ResetDC is not allowed between StartPage and EndPage, so the current page is closed here and reopened in
+      PrinterStartPage. ResetDC clears the device context state, so the abort procedure is set again afterwards. }
+    Winapi.Windows.EndPage(LPrinterDC);
+    FPageClosed := True;
+    FPagePrinted := False;
+
+    Result := ResetDC(LPrinterDC, LDeviceMode^) <> 0;
+  finally
+    GlobalUnlock(LDeviceModeHandle);
+  end;
+
+  if Result then
+  begin
+    FPortrait := APortrait;
+    SetAbortProc(LPrinterDC, @FastVclAbortProc);
+  end;
+end;
+{$ENDIF}
 
 procedure TPDFDocumentVclPrinter.PrinterEndDoc;
 begin
@@ -2942,6 +3106,15 @@ end;
 
 procedure TPDFDocumentVclPrinter.PrinterStartPage;
 begin
+{$IFDEF PDFIUMCORE_PRINTER_ORIENTATION_FIX}
+  { Reopen the page that PrinterSetOrientation closed around ResetDC. }
+  if FPageClosed then
+  begin
+    Winapi.Windows.StartPage(GetPrinterDC);
+    FPageClosed := False;
+  end
+  else
+{$ENDIF}
   if (Printer.PageNumber > 1) or FPagePrinted then
     Printer.NewPage;
 end;
@@ -2959,9 +3132,14 @@ end;
 class function TPDFDocumentVclPrinter.PrintDocument(const ADocument: TPDFDocument; const AJobTitle: string;
   const AShowPrintDialog: Boolean = True; const AAllowPageRange: Boolean = True; const AParentWnd: HWND = 0): Boolean;
 var
-  LPDFDocumentVclPrinter: TPDFDocumentVclPrinter;
+  LFromPage: Integer;
+  LToPage: Integer;
+{$IFDEF PDFIUMCORE_PRINTER_COPIES_COLLATE_FIX}
+  LCopies: Integer;
+  LCollate: Boolean;
+{$ENDIF}
   LPrintDialog: TPrintDialog;
-  LFromPage, LToPage: Integer;
+  LPDFDocumentVclPrinter: TPDFDocumentVclPrinter;
 begin
   Result := False;
 
@@ -2970,6 +3148,10 @@ begin
 
   LFromPage := 1;
   LToPage := ADocument.PageCount;
+{$IFDEF PDFIUMCORE_PRINTER_COPIES_COLLATE_FIX}
+  LCopies := Max(Printer.Copies, 1);
+  LCollate := False;
+{$ENDIF}
 
   if AShowPrintDialog then
   begin
@@ -2996,30 +3178,59 @@ begin
         LFromPage := LPrintDialog.FromPage;
         LToPage := LPrintDialog.ToPage;
       end;
+{$IFDEF PDFIUMCORE_PRINTER_COPIES_COLLATE_FIX}
+      LCopies := Max(LPrintDialog.Copies, 1);
+      LCollate := LPrintDialog.Collate;
+{$ELSE}
       { Note! Copies and collate won't work. Andy's core class needs to be fixed to get it working.
-        Capture here the variables and pass them to following Print function.
+        Capture here the variables and pass them to following Print function. See the
+        PDFIUMCORE_PRINTER_COPIES_COLLATE_FIX define.
 
         LCopies := LPrintDialog.Copies;
         LCollate := LPrintDialog.Collate; }
+{$ENDIF}
     finally
       LPrintDialog.Free;
     end;
   end;
 
+{$IFDEF PDFIUMCORE_PRINTER_COPIES_COLLATE_FIX}
+  { The print loop produces the copies itself, so the printer driver must not multiply them again. }
+  Printer.Copies := 1;
+{$ENDIF}
+
+{$IFDEF PDFIUMCORE_PRINTER_ORIENTATION_FIX}
+  { The print job starts in the orientation of the first printed page. PrinterSetOrientation then switches the
+    orientation whenever a following page needs a different one. }
+  if (ADocument.PageCount > 0) and (LFromPage >= 1) and (LFromPage <= ADocument.PageCount) then
+  begin
+    if ADocument.Pages[LFromPage - 1].Height > ADocument.Pages[LFromPage - 1].Width then
+      Printer.Orientation := poPortrait
+    else
+      Printer.Orientation := poLandscape;
+  end;
+{$ELSE}
   { Note! If the document has pages in portrait and landscape orientation, this will not work properly. The problem is
     that the orientation of the printer can be changed only when outside BeginDoc and EndDoc. If there is a need for
-    that, then Andy's core class needs to be fixed. }
+    that, then Andy's core class needs to be fixed. See the PDFIUMCORE_PRINTER_ORIENTATION_FIX define. }
   if ADocument.PageCount > 0 then
+  begin
     if ADocument.Pages[0].Height > ADocument.Pages[0].Width then
       Printer.Orientation := poPortrait
     else
       Printer.Orientation := poLandscape;
+  end;
+{$ENDIF}
 
   LPDFDocumentVclPrinter := TPDFDocumentVclPrinter.Create;
   try
     if LPDFDocumentVclPrinter.BeginPrint(AJobTitle) then
     try
+{$IFDEF PDFIUMCORE_PRINTER_COPIES_COLLATE_FIX}
+      Result := LPDFDocumentVclPrinter.Print(ADocument, LFromPage - 1, LToPage - 1, LCopies, LCollate);
+{$ELSE}
       Result := LPDFDocumentVclPrinter.Print(ADocument, LFromPage - 1, LToPage - 1);
+{$ENDIF}
     finally
       LPDFDocumentVclPrinter.EndPrint;
     end;
