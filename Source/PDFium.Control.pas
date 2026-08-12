@@ -386,7 +386,6 @@ type
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
 {$IFDEF ALPHASKINS}
-    destructor Destroy; override;
     procedure AfterConstruction; override;
     procedure WndProc(var AMessage: TMessage); override;
     property SkinData: TsScrollWndData read FSkinData write FSkinData;
@@ -2691,7 +2690,7 @@ begin
   Options := [goFixedVertLine, goFixedHorzLine, goVertLine, goRowSelect, goThumbTracking];
   ScrollBars := System.UITypes.TScrollStyle.ssVertical;
   Width := 180;
-  
+
   FThumbnailCache := TObjectList<TPDFPageBitmapCacheEntry>.Create(True);
 end;
 
@@ -2699,7 +2698,7 @@ destructor TCustomPDFiumControlThumbnails.Destroy;
 begin
   FThumbnailCache.Free;
 
-{$IFDEF ALPHASKINS}  
+{$IFDEF ALPHASKINS}
   if Assigned(FScrollWnd) then
   begin
     FScrollWnd.Free;
@@ -2955,8 +2954,8 @@ var
 begin
   if not Assigned(PDFiumControl) or not HandleAllocated then
     Exit;
-    
-  RowCount := Max(PDFiumControl.PageCount, 1);  
+
+  RowCount := Max(PDFiumControl.PageCount, 1);
 
   if DefaultColWidth <> ClientWidth then
     DefaultColWidth := ClientWidth;
@@ -3060,7 +3059,7 @@ begin
   begin
     FPDFiumControl.OnPageChanged := DoPDFiumControlPageChanged;
     FPDFiumControl.OnAfterLoad := DoPDFiumControlAfterLoad;
-    
+
     SetDefaultSize;
   end;
 end;
