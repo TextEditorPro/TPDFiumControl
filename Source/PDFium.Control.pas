@@ -358,12 +358,15 @@ type
   private
     FIsMousedown: Boolean;
     FPDFiumControl: TPDFiumControl;
-    FThumbnailCache: TObjectList<TPDFPageBitmapCacheEntry>;
-    FThumbnailCacheCounter: Int64;
 {$IFDEF ALPHASKINS}
     FScrollWnd: TacScrollWnd;
     FSkinData: TsScrollWndData;
 {$ENDIF}
+    FThumbnailCache: TObjectList<TPDFPageBitmapCacheEntry>;
+    FThumbnailCacheCounter: Int64;
+    FThumbnailFontHeight: Integer;
+    FThumbnailPageHeight: Integer;
+    FThumbnailPageWidth: Integer;
     FTimerStarted: Boolean;
     function GetThumbnailCacheBitmap(const ARect: TRect; const AIndex: Integer): TBitmap;
     procedure ClearThumbnailCache;
@@ -437,7 +440,6 @@ const
   CMaxCachedPages = 6;
   { Pages larger than this are rendered directly to the device context so the cache memory usage stays bounded. }
   CMaxCachedPagePixels = 8000000;
-  { Thumbnail bitmaps are small (cell sized), so a larger count stays cheap while covering the visible rows. }
   CMaxCachedThumbnails = 50;
 
 var
@@ -2491,7 +2493,10 @@ end;
 
 function TCustomPDFiumControl.PageRotation(const AIndex: Integer): TPDFPageRotation;
 begin
-  Result := if (AIndex >= 0) and (AIndex < Length(FPageInfo)) then FPageInfo[AIndex].Rotation else prNormal;
+  if (AIndex >= 0) and (AIndex < Length(FPageInfo)) then
+    Result := FPageInfo[AIndex].Rotation
+  else
+    Result := prNormal;
 end;
 
 procedure TCustomPDFiumControl.RotatePage(const AClockwise: Boolean = True);
@@ -2696,8 +2701,6 @@ end;
 
 destructor TCustomPDFiumControlThumbnails.Destroy;
 begin
-  FThumbnailCache.Free;
-
 {$IFDEF ALPHASKINS}
   if Assigned(FScrollWnd) then
   begin
@@ -2710,7 +2713,9 @@ begin
     FSkinData.Free;
     FSkinData := nil;
   end;
+
 {$ENDIF}
+  FThumbnailCache.Free;
 
   inherited;
 end;
@@ -2723,7 +2728,6 @@ begin
 end;
 
 {$IFDEF ALPHASKINS}
-
 procedure TCustomPDFiumControlThumbnails.AfterConstruction;
 begin
   inherited AfterConstruction;
@@ -2837,7 +2841,10 @@ end;
 
 procedure TCustomPDFiumControlThumbnails.DrawCell(ACol, ARow: Longint; ARect: TRect; AState: TGridDrawState);
 var
+  LPageLeft: Integer;
   LRect: TRect;
+  LBorderRect: TRect;
+  LBitmap: TBitmap;
 begin
   if not Assigned(PDFiumControl) then
     Exit;
@@ -2882,29 +2889,34 @@ begin
 
   Canvas.FillRect(ARect);
 
-  LRect := ARect;
-
-  InflateRect(LRect, -9, -9);
-  Inc(LRect.Left, 8);
-
-{$IFDEF ALPHASKINS}
-  if IsLightStyleColor(Color) then
+  if (FThumbnailPageWidth > 0) and (FThumbnailPageHeight > 0) then
   begin
-{$ENDIF}
-    Canvas.Pen.Color := TColors.Silver;
-    Canvas.Rectangle(LRect);
+    { The page is centered in the visible width and starts below the page number line so the number never
+      overlaps the page. }
+    LPageLeft := ARect.Left + (ClientWidth - ARect.Left - FThumbnailPageWidth) div 2;
+    LRect := TRect.Create(LPageLeft, ARect.Top + FThumbnailFontHeight + 4,
+      LPageLeft + FThumbnailPageWidth, ARect.Top + FThumbnailFontHeight + 4 + FThumbnailPageHeight);
 
-    InflateRect(LRect, -1, -1);
 {$IFDEF ALPHASKINS}
-  end;
+    if IsLightStyleColor(Color) then
+    begin
+{$ENDIF}
+      LBorderRect := LRect;
+      InflateRect(LBorderRect, 1, 1);
+
+      Canvas.Pen.Color := TColors.Silver;
+      Canvas.Rectangle(LBorderRect);
+{$IFDEF ALPHASKINS}
+    end;
 {$ENDIF}
 
-  var LBitmap := GetThumbnailCacheBitmap(LRect, ARow);
+    LBitmap := GetThumbnailCacheBitmap(LRect, ARow);
 
-  if Assigned(LBitmap) then
-    BitBlt(Canvas.Handle, LRect.Left, LRect.Top, LRect.Width, LRect.Height, LBitmap.Canvas.Handle, 0, 0, SRCCOPY)
-  else
-    PDFiumControl.PaintPage(Canvas.Handle, LRect, ARow);
+    if Assigned(LBitmap) then
+      BitBlt(Canvas.Handle, LRect.Left, LRect.Top, LRect.Width, LRect.Height, LBitmap.Canvas.Handle, 0, 0, SRCCOPY)
+    else
+      PDFiumControl.PaintPage(Canvas.Handle, LRect, ARow);
+  end;
 
   Canvas.Pen.Color := TColors.Black;
   Canvas.Brush.Color := TColors.SysBtnFace;
@@ -2964,7 +2976,11 @@ begin
 
   if Assigned(LPage) then
   begin
-    LHeight := Round(((DefaultColWidth - 8) / LPage.Width) * LPage.Height);
+    FThumbnailFontHeight := Canvas.TextHeight('P');
+    FThumbnailPageWidth := ClientWidth - 24;
+    FThumbnailPageHeight := Round(FThumbnailPageWidth / LPage.Width * LPage.Height);
+
+    LHeight := FThumbnailPageHeight + FThumbnailFontHeight + 14;
 
     if DefaultRowHeight <> LHeight then
       DefaultRowHeight := LHeight;
@@ -2972,22 +2988,30 @@ begin
 end;
 
 function TCustomPDFiumControlThumbnails.GetThumbnailCacheBitmap(const ARect: TRect; const AIndex: Integer): TBitmap;
+var
+  LWidth: Integer;
+  LHeight: Integer;
+  LRotation: TPDFPageRotation;
+  LEntry: TPDFPageBitmapCacheEntry;
+  LItem: TPDFPageBitmapCacheEntry;
+  LOldest: Integer;
+  LIndex: Integer;
 begin
   Result := nil;
 
-  var LWidth := ARect.Width;
-  var LHeight := ARect.Height;
+  LWidth := ARect.Width;
+  LHeight := ARect.Height;
 
   if (LWidth <= 0) or (LHeight <= 0) then
     Exit;
 
-  var LRotation := PDFiumControl.PageRotation(AIndex);
+  LRotation := PDFiumControl.PageRotation(AIndex);
 
   Inc(FThumbnailCacheCounter);
 
-  var LEntry: TPDFPageBitmapCacheEntry := nil;
+  LEntry := nil;
 
-  for var LItem in FThumbnailCache do
+  for LItem in FThumbnailCache do
   if LItem.PageIndex = AIndex then
   begin
     LEntry := LItem;
@@ -3006,9 +3030,9 @@ begin
   begin
     if FThumbnailCache.Count >= CMaxCachedThumbnails then
     begin
-      var LOldest := 0;
+      LOldest := 0;
 
-      for var LIndex := 1 to FThumbnailCache.Count - 1 do
+      for LIndex := 1 to FThumbnailCache.Count - 1 do
       if FThumbnailCache[LIndex].LastUsed < FThumbnailCache[LOldest].LastUsed then
         LOldest := LIndex;
 
@@ -3040,7 +3064,10 @@ end;
 
 procedure TCustomPDFiumControlThumbnails.DoPDFiumControlPageChanged(Sender: TObject);
 begin
-  if Visible and (PDFiumControl.PageIndex >= 0) and (PDFiumControl.PageIndex < RowCount) then
+  if not Visible then
+    Exit;
+
+  if (PDFiumControl.PageIndex >= 0) and (PDFiumControl.PageIndex < RowCount) then
     Row := PDFiumControl.PageIndex;
 end;
 
