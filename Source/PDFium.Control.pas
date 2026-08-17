@@ -441,6 +441,7 @@ const
   { Pages larger than this are rendered directly to the device context so the cache memory usage stays bounded. }
   CMaxCachedPagePixels = 8000000;
   CMaxCachedThumbnails = 50;
+  CThumbnailSupersampleFactor = 4;
 
 var
   GHintWindow: THintWindow;
@@ -2996,6 +2997,8 @@ var
   LItem: TPDFPageBitmapCacheEntry;
   LOldest: Integer;
   LIndex: Integer;
+  LSuperSampled: TBitmap;
+  LStretchBltMode: Integer;
 begin
   Result := nil;
 
@@ -3052,7 +3055,22 @@ begin
   LEntry.Bitmap.Canvas.Brush.Color := TColors.White;
   LEntry.Bitmap.Canvas.FillRect(TRect.Create(0, 0, LWidth, LHeight));
 
-  PDFiumControl.PaintPage(LEntry.Bitmap.Canvas.Handle, TRect.Create(0, 0, LWidth, LHeight), AIndex);
+  LSuperSampled := TBitmap.Create;
+  try
+    LSuperSampled.PixelFormat := pf32bit;
+    LSuperSampled.SetSize(LWidth * CThumbnailSupersampleFactor, LHeight * CThumbnailSupersampleFactor);
+    LSuperSampled.Canvas.Brush.Color := TColors.White;
+    LSuperSampled.Canvas.FillRect(TRect.Create(0, 0, LSuperSampled.Width, LSuperSampled.Height));
+
+    PDFiumControl.PaintPage(LSuperSampled.Canvas.Handle, TRect.Create(0, 0, LSuperSampled.Width, LSuperSampled.Height), AIndex);
+
+    LStretchBltMode := SetStretchBltMode(LEntry.Bitmap.Canvas.Handle, HALFTONE);
+    SetBrushOrgEx(LEntry.Bitmap.Canvas.Handle, 0, 0, nil);
+    StretchBlt(LEntry.Bitmap.Canvas.Handle, 0, 0, LWidth, LHeight, LSuperSampled.Canvas.Handle, 0, 0, LSuperSampled.Width, LSuperSampled.Height, SRCCOPY);
+    SetStretchBltMode(LEntry.Bitmap.Canvas.Handle, LStretchBltMode);
+  finally
+    LSuperSampled.Free;
+  end;
 
   Result := LEntry.Bitmap;
 end;
