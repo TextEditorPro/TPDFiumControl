@@ -2843,6 +2843,7 @@ end;
 procedure TCustomPDFiumControlThumbnails.DrawCell(ACol, ARow: Longint; ARect: TRect; AState: TGridDrawState);
 var
   LPageLeft: Integer;
+  LPageTop: Integer;
   LRect: TRect;
   LBorderRect: TRect;
   LBitmap: TBitmap;
@@ -2852,6 +2853,8 @@ begin
 
   if (gdSelected in AState) and (ARow <> PDFiumControl.PageIndex) then
     Exit;
+
+  Canvas.Font := Font;
 
   if gdSelected in AState then
   begin
@@ -2895,8 +2898,8 @@ begin
     { The page is centered in the visible width and starts below the page number line so the number never
       overlaps the page. }
     LPageLeft := ARect.Left + (ClientWidth - ARect.Left - FThumbnailPageWidth) div 2;
-    LRect := TRect.Create(LPageLeft, ARect.Top + FThumbnailFontHeight + 4,
-      LPageLeft + FThumbnailPageWidth, ARect.Top + FThumbnailFontHeight + 4 + FThumbnailPageHeight);
+    LPageTop := ARect.Top + FThumbnailFontHeight + ScaleValue(4);
+    LRect := TRect.Create(LPageLeft, LPageTop, LPageLeft + FThumbnailPageWidth, LPageTop + FThumbnailPageHeight);
 
 {$IFDEF ALPHASKINS}
     if IsLightStyleColor(Color) then
@@ -2922,7 +2925,7 @@ begin
   Canvas.Pen.Color := TColors.Black;
   Canvas.Brush.Color := TColors.SysBtnFace;
   SetBkMode(Canvas.Handle, TRANSPARENT);
-  Canvas.Textout(ARect.Left + 2, ARect.Top, IntToStr(ARow + 1));
+  Canvas.Textout(ARect.Left + ScaleValue(2), ARect.Top, IntToStr(ARow + 1));
   SetBkMode(Canvas.Handle, OPAQUE);
 end;
 
@@ -2977,11 +2980,16 @@ begin
 
   if Assigned(LPage) then
   begin
+    { The font must be assigned to the canvas before measuring, because with DefaultDrawing = False the grid never
+      does it and the canvas would otherwise measure with a default font scaled by the system DPI. }
+    Canvas.Font := Font;
     FThumbnailFontHeight := Canvas.TextHeight('P');
-    FThumbnailPageWidth := ClientWidth - 24;
+    { The margins are scaled with the control's PPI so that the page keeps the same proportion of the row at
+      every DPI. }
+    FThumbnailPageWidth := ClientWidth - ScaleValue(24);
     FThumbnailPageHeight := Round(FThumbnailPageWidth / LPage.Width * LPage.Height);
 
-    LHeight := FThumbnailPageHeight + FThumbnailFontHeight + 14;
+    LHeight := FThumbnailPageHeight + FThumbnailFontHeight + ScaleValue(14);
 
     if DefaultRowHeight <> LHeight then
       DefaultRowHeight := LHeight;
@@ -3276,6 +3284,8 @@ var
 {$ENDIF}
   LPrintDialog: TPrintDialog;
   LPDFDocumentVclPrinter: TPDFDocumentVclPrinter;
+  LPrintDocument: TPDFDocument;
+  LStream: TMemoryStream;
 begin
   Result := False;
 
@@ -3335,43 +3345,62 @@ begin
   Printer.Copies := 1;
 {$ENDIF}
 
+  { Printing flattens every page that contains annotations (see TPdfPage.Draw with proPrinting in PdfiumCore),
+    which permanently converts the interactive form fields of the printed document into static page content.
+    Therefore the printing is done from a temporary in-memory copy, so that the fields of the on-screen document
+    stay editable after printing. SaveToStream commits the value of the currently focused field and saves the
+    form data, so the copy prints the current field values. }
+  LPrintDocument := TPDFDocument.Create;
+  try
+    LStream := TMemoryStream.Create;
+    try
+      ADocument.SaveToStream(LStream);
+      LStream.Position := 0;
+      LPrintDocument.LoadFromStream(LStream);
+    finally
+      LStream.Free;
+    end;
+
 {$IFDEF PDFIUMCORE_PRINTER_ORIENTATION_FIX}
-  { The print job starts in the orientation of the first printed page. PrinterSetOrientation then switches the
-    orientation whenever a following page needs a different one. }
-  if (ADocument.PageCount > 0) and (LFromPage >= 1) and (LFromPage <= ADocument.PageCount) then
-  begin
-    if ADocument.Pages[LFromPage - 1].Height > ADocument.Pages[LFromPage - 1].Width then
-      Printer.Orientation := poPortrait
-    else
-      Printer.Orientation := poLandscape;
-  end;
+    { The print job starts in the orientation of the first printed page. PrinterSetOrientation then switches the
+      orientation whenever a following page needs a different one. }
+    if (LPrintDocument.PageCount > 0) and (LFromPage >= 1) and (LFromPage <= LPrintDocument.PageCount) then
+    begin
+      if LPrintDocument.Pages[LFromPage - 1].Height > LPrintDocument.Pages[LFromPage - 1].Width then
+        Printer.Orientation := poPortrait
+      else
+        Printer.Orientation := poLandscape;
+    end;
 {$ELSE}
-  { Note! If the document has pages in portrait and landscape orientation, this will not work properly. The problem is
-    that the orientation of the printer can be changed only when outside BeginDoc and EndDoc. If there is a need for
-    that, then Andy's core class needs to be fixed. See the PDFIUMCORE_PRINTER_ORIENTATION_FIX define. }
-  if ADocument.PageCount > 0 then
-  begin
-    if ADocument.Pages[0].Height > ADocument.Pages[0].Width then
-      Printer.Orientation := poPortrait
-    else
-      Printer.Orientation := poLandscape;
-  end;
+    { Note! If the document has pages in portrait and landscape orientation, this will not work properly. The problem is
+      that the orientation of the printer can be changed only when outside BeginDoc and EndDoc. If there is a need for
+      that, then Andy's core class needs to be fixed. See the PDFIUMCORE_PRINTER_ORIENTATION_FIX define. }
+    if LPrintDocument.PageCount > 0 then
+    begin
+      if LPrintDocument.Pages[0].Height > LPrintDocument.Pages[0].Width then
+        Printer.Orientation := poPortrait
+      else
+        Printer.Orientation := poLandscape;
+    end;
 {$ENDIF}
 
-  LPDFDocumentVclPrinter := TPDFDocumentVclPrinter.Create;
-  try
-    if LPDFDocumentVclPrinter.BeginPrint(AJobTitle) then
+    LPDFDocumentVclPrinter := TPDFDocumentVclPrinter.Create;
     try
+      if LPDFDocumentVclPrinter.BeginPrint(AJobTitle) then
+      try
 {$IFDEF PDFIUMCORE_PRINTER_COPIES_COLLATE_FIX}
-      Result := LPDFDocumentVclPrinter.Print(ADocument, LFromPage - 1, LToPage - 1, LCopies, LCollate);
+        Result := LPDFDocumentVclPrinter.Print(LPrintDocument, LFromPage - 1, LToPage - 1, LCopies, LCollate);
 {$ELSE}
-      Result := LPDFDocumentVclPrinter.Print(ADocument, LFromPage - 1, LToPage - 1);
+        Result := LPDFDocumentVclPrinter.Print(LPrintDocument, LFromPage - 1, LToPage - 1);
 {$ENDIF}
+      finally
+        LPDFDocumentVclPrinter.EndPrint;
+      end;
     finally
-      LPDFDocumentVclPrinter.EndPrint;
+      LPDFDocumentVclPrinter.Free;
     end;
   finally
-    LPDFDocumentVclPrinter.Free;
+    LPrintDocument.Free;
   end;
 end;
 
