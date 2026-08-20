@@ -132,6 +132,7 @@ type
     FOnLoadProtected: TPDFLoadProtectedEvent;
     FOnPageChanged: TNotifyEvent;
     FOnPaint: TNotifyEvent;
+    FOnRotation: TNotifyEvent;
     FOnScroll: TPDFControlScrollEvent;
     FPageBorderColor: TColor;
     FPageCache: TObjectList<TPDFPageBitmapCacheEntry>;
@@ -251,7 +252,9 @@ type
     function FindPrevious: Integer;
     function IsPageIndexValid(const APageIndex: Integer): Boolean;
     function IsTextSelected: Boolean;
+    function PageHeight(const AIndex: Integer): Single;
     function PageRotation(const AIndex: Integer): TPDFPageRotation;
+    function PageWidth(const AIndex: Integer): Single;
     function SearchAll: Integer; overload;
     function SearchAll(const ASearchText: string): Integer; overload;
     function SearchAll(const ASearchText: string; const AHighlightAll: Boolean; const AMatchCase: Boolean;
@@ -303,6 +306,7 @@ type
     property OnLoadProtected: TPDFLoadProtectedEvent read FOnLoadProtected write FOnLoadProtected;
     property OnPageChanged: TNotifyEvent read FOnPageChanged write FOnPageChanged;
     property OnPaint: TNotifyEvent read FOnPaint write FOnPaint;
+    property OnRotation: TNotifyEvent read FOnRotation write FOnRotation;
     property OnScroll: TPDFControlScrollEvent read FOnScroll write FOnScroll;
     property PDFDocument: TPDFDocument read FPDFDocument;
     property PageBorderColor: TColor read FPageBorderColor write FPageBorderColor default TColors.Silver;
@@ -341,6 +345,7 @@ type
     property OnLoadProtected;
     property OnPageChanged;
     property OnPaint;
+    property OnRotation;
     property OnScroll;
     property PageBorderColor;
     property PageMargin;
@@ -365,13 +370,14 @@ type
     FThumbnailCache: TObjectList<TPDFPageBitmapCacheEntry>;
     FThumbnailCacheCounter: Int64;
     FThumbnailFontHeight: Integer;
-    FThumbnailPageHeight: Integer;
     FThumbnailPageWidth: Integer;
     FTimerStarted: Boolean;
     function GetThumbnailCacheBitmap(const ARect: TRect; const AIndex: Integer): TBitmap;
+    function ThumbnailPageHeight(const AIndex: Integer): Integer;
     procedure ClearThumbnailCache;
     procedure DoPDFiumControlAfterLoad(Sender: TObject);
     procedure DoPDFiumControlPageChanged(Sender: TObject);
+    procedure DoPDFiumControlRotation(Sender: TObject);
     procedure SetDefaultSize;
     procedure SetPDFiumControl(const AValue: TPDFiumControl);
   protected
@@ -2492,12 +2498,28 @@ begin
   Result := SelectionLength <> 0;
 end;
 
+function TCustomPDFiumControl.PageHeight(const AIndex: Integer): Single;
+begin
+  if (AIndex >= 0) and (AIndex < Length(FPageInfo)) then
+    Result := FPageInfo[AIndex].Height
+  else
+    Result := 0;
+end;
+
 function TCustomPDFiumControl.PageRotation(const AIndex: Integer): TPDFPageRotation;
 begin
   if (AIndex >= 0) and (AIndex < Length(FPageInfo)) then
     Result := FPageInfo[AIndex].Rotation
   else
     Result := prNormal;
+end;
+
+function TCustomPDFiumControl.PageWidth(const AIndex: Integer): Single;
+begin
+  if (AIndex >= 0) and (AIndex < Length(FPageInfo)) then
+    Result := FPageInfo[AIndex].Width
+  else
+    Result := 0;
 end;
 
 procedure TCustomPDFiumControl.RotatePage(const AClockwise: Boolean = True);
@@ -2539,6 +2561,9 @@ begin
   end;
 
   DoSizeChanged;
+
+  if Assigned(FOnRotation) then
+    FOnRotation(Self);
 end;
 
 procedure TCustomPDFiumControl.RotatePageClockwise;
@@ -2844,6 +2869,7 @@ procedure TCustomPDFiumControlThumbnails.DrawCell(ACol, ARow: Longint; ARect: TR
 var
   LPageLeft: Integer;
   LPageTop: Integer;
+  LPageHeight: Integer;
   LRect: TRect;
   LBorderRect: TRect;
   LBitmap: TBitmap;
@@ -2893,13 +2919,15 @@ begin
 
   Canvas.FillRect(ARect);
 
-  if (FThumbnailPageWidth > 0) and (FThumbnailPageHeight > 0) then
+  LPageHeight := ThumbnailPageHeight(ARow);
+
+  if (FThumbnailPageWidth > 0) and (LPageHeight > 0) then
   begin
     { The page is centered in the visible width and starts below the page number line so the number never
       overlaps the page. }
     LPageLeft := ARect.Left + (ClientWidth - ARect.Left - FThumbnailPageWidth) div 2;
     LPageTop := ARect.Top + FThumbnailFontHeight + ScaleValue(4);
-    LRect := TRect.Create(LPageLeft, LPageTop, LPageLeft + FThumbnailPageWidth, LPageTop + FThumbnailPageHeight);
+    LRect := TRect.Create(LPageLeft, LPageTop, LPageLeft + FThumbnailPageWidth, LPageTop + LPageHeight);
 
 {$IFDEF ALPHASKINS}
     if IsLightStyleColor(Color) then
@@ -2963,9 +2991,25 @@ begin
   SetDefaultSize;
 end;
 
+function TCustomPDFiumControlThumbnails.ThumbnailPageHeight(const AIndex: Integer): Integer;
+var
+  LPageWidth: Single;
+begin
+  Result := 0;
+
+  if not Assigned(PDFiumControl) then
+    Exit;
+
+  LPageWidth := PDFiumControl.PageWidth(AIndex);
+
+  if LPageWidth > 0 then
+    Result := Round(FThumbnailPageWidth / LPageWidth * PDFiumControl.PageHeight(AIndex));
+end;
+
 procedure TCustomPDFiumControlThumbnails.SetDefaultSize;
 var
-  LPage: TPDFPage;
+  LIndex: Integer;
+  LPageHeight: Integer;
   LHeight: Integer;
 begin
   if not Assigned(PDFiumControl) or not HandleAllocated then
@@ -2976,23 +3020,31 @@ begin
   if DefaultColWidth <> ClientWidth then
     DefaultColWidth := ClientWidth;
 
-  LPage := PDFiumControl.GetPage(0);
+  Canvas.Font := Font;
+  FThumbnailFontHeight := Canvas.TextHeight('P');
+  FThumbnailPageWidth := ClientWidth - ScaleValue(24);
 
-  if Assigned(LPage) then
+  LPageHeight := ThumbnailPageHeight(0);
+
+  if LPageHeight > 0 then
   begin
-    { The font must be assigned to the canvas before measuring, because with DefaultDrawing = False the grid never
-      does it and the canvas would otherwise measure with a default font scaled by the system DPI. }
-    Canvas.Font := Font;
-    FThumbnailFontHeight := Canvas.TextHeight('P');
-    { The margins are scaled with the control's PPI so that the page keeps the same proportion of the row at
-      every DPI. }
-    FThumbnailPageWidth := ClientWidth - ScaleValue(24);
-    FThumbnailPageHeight := Round(FThumbnailPageWidth / LPage.Width * LPage.Height);
-
-    LHeight := FThumbnailPageHeight + FThumbnailFontHeight + ScaleValue(14);
+    LHeight := LPageHeight + FThumbnailFontHeight + ScaleValue(14);
 
     if DefaultRowHeight <> LHeight then
       DefaultRowHeight := LHeight;
+  end;
+
+  for LIndex := 0 to PDFiumControl.PageCount - 1 do
+  begin
+    LPageHeight := ThumbnailPageHeight(LIndex);
+
+    if LPageHeight > 0 then
+    begin
+      LHeight := LPageHeight + FThumbnailFontHeight + ScaleValue(14);
+
+      if RowHeights[LIndex] <> LHeight then
+        RowHeights[LIndex] := LHeight;
+    end;
   end;
 end;
 
@@ -3104,6 +3156,12 @@ begin
   Invalidate;
 end;
 
+procedure TCustomPDFiumControlThumbnails.DoPDFiumControlRotation(Sender: TObject);
+begin
+  SetDefaultSize;
+  Invalidate;
+end;
+
 procedure TCustomPDFiumControlThumbnails.SetPDFiumControl(const AValue: TPDFiumControl);
 begin
   FPDFiumControl := AValue;
@@ -3112,6 +3170,7 @@ begin
   begin
     FPDFiumControl.OnPageChanged := DoPDFiumControlPageChanged;
     FPDFiumControl.OnAfterLoad := DoPDFiumControlAfterLoad;
+    FPDFiumControl.OnRotation := DoPDFiumControlRotation;
 
     SetDefaultSize;
   end;
